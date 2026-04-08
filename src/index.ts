@@ -8,7 +8,7 @@ import type { PackageJson } from 'type-fest';
 /**
  * オプション
  */
-export type CreateDistPackageJsonOptions = {
+export type DistPackageOptions = {
   /**
    * コンテンツ
    */
@@ -71,7 +71,7 @@ const INHERIT_PROPS = [
   'type',
   'engines',
   'keywords',
-];
+] as const;
 
 /**
  * package.jsonから依存関係として参照するプロパティ
@@ -86,9 +86,7 @@ const DEPENDENCIES_PROP_NAMES = [
 /**
  * package.jsonを編集しビルド結果のディレクトリに出力するプラグイン
  */
-export default function createDistPackageJson(
-  options: CreateDistPackageJsonOptions = {},
-): Plugin {
+export default function distPackage(options: DistPackageOptions = {}): Plugin {
   const {
     content = {},
     inheritProps = INHERIT_PROPS,
@@ -102,7 +100,7 @@ export default function createDistPackageJson(
   const inputDirPath = path.normalize(path.resolve(inputDir));
 
   return {
-    name: 'create-dist-packagejson',
+    name: 'dist-package',
     moduleParsed: (moduleInfo) => {
       const importedIds = moduleInfo.importedIds || [];
       for (const importedId of importedIds) {
@@ -117,7 +115,7 @@ export default function createDistPackageJson(
     },
     generateBundle: async (
       outputOptions: NormalizedOutputOptions,
-      bundle: OutputBundle,
+      _: OutputBundle,
     ) => {
       // 開発時用のpackage.jsonを取得
       const orgPackageJson = fs.readJsonSync(

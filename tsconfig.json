@@ -1,17 +1,17 @@
 {
   "compilerOptions": {
-    "target": "ES2023",
+    "target": "ESNext",
     "useDefineForClassFields": true,
     "module": "ESNext",
-    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "lib": ["ESNext", "DOM", "DOM.Iterable"],
     "types": ["node"],
     "skipLibCheck": true,
     /* Bundler mode */
     "moduleResolution": "bundler",
-    "allowImportingTsExtensions": true,
-    "verbatimModuleSyntax": true,
+    "allowImportingTsExtensions": false,
+    "verbatimModuleSyntax": false,
     "moduleDetection": "force",
-    "noEmit": true,
+    "noEmit": false,
     /* Linting */
     "strict": true,
     "noUnusedLocals": true,
@@ -20,9 +20,9 @@
     "noFallthroughCasesInSwitch": true,
     "noUncheckedSideEffectImports": true,
     /* Source */
-    "rootDir": "src",
-    "outDir": "dist",
-    "declarationDir": "dist",
+    "rootDir": "./src",
+    "outDir": "./dist",
+    "declarationDir": "./dist",
     "typeRoots": ["./node_modules/@types"],
     "jsx": "react-jsx",
     "allowJs": true,
@@ -40,6 +40,6 @@
     "strictPropertyInitialization": false,
     "preserveSymlinks": false
   },
-  "include": ["src"],
-  "exclude": ["src/**/*.test.*"]
+  "include": ["./src/**/*"],
+  "exclude": ["./src/**/*.test.*"]
 }
