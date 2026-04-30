@@ -40,6 +40,5 @@
     "strictPropertyInitialization": false,
     "preserveSymlinks": false
   },
-  "include": ["./src/**/*"],
-  "exclude": ["./src/**/*.test.*"]
+  "include": ["./src/**/*"]
 }
