@@ -1,6 +1,6 @@
 # @niche-works/rollup-plugin-dist-package
 
-インポートパスを整理するために、ディストリビューション固有の `package.json` ファイルを生成するニッチなプラグインです。
+インポートパスを整理するために、ディストリビューション固有の `package.json` ファイルを生成するニッチなプラグインです。  
 `@niche-works/rollup-plugin-dist-package` は、Rollup のビルドプロセス中に `package.json` を編集し、  
 出力ディレクトリに適切な形式で出力します。  
 npmへ公開する`package.json`に最低限の項目のみ出力すること、  
