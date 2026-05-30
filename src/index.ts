@@ -10,23 +10,35 @@ import type { PackageJson } from 'type-fest';
  */
 export type DistPackageOptions = {
   /**
-   * コンテンツ
-   */
-  content?:
-    | Partial<PackageJson>
-    | ((packageJson: PackageJson) => Partial<PackageJson>);
-
-  /**
    * 元のpackage.jsonから引き継ぐ項目
    * @default ['name', 'version', 'description', 'repository', 'bugs', 'homepage', 'author', 'contributors', 'license', 'type', 'engines', 'keywords']
    */
   inheritProps?: string[];
 
   /**
+   * package.jsonに出力する内容
+   */
+  content?:
+    | Partial<PackageJson>
+    | ((packageJson: PackageJson) => Partial<PackageJson>);
+
+  /**
    * 入力元ディレクトリ
    * 未指定の場合はカレントディレクトリ
    */
   inputDir?: string;
+
+  /**
+   * 出力先ディレクトリ
+   * 未指定の場合はrollupのoutput設定から取得
+   */
+  outputDir?: string;
+
+  /**
+   * ワークスペース内の依存関係を解決しバージョンに置き換えるか
+   * @default false
+   */
+  resolveWorkspaceDeps?: boolean;
 
   /**
    * ワークスペースの場合
@@ -36,24 +48,12 @@ export type DistPackageOptions = {
   packagesDir?: string;
 
   /**
-   * 出力先ディレクトリ
-   * 未指定の場合はrollupのoutput設定から取得
-   */
-  outputDir?: string;
-
-  /**
    * 出力前の加工処理
    */
   processor?: (packageJson: PackageJson) => PackageJson;
-
-  /**
-   * ワークスペースの依存関係を保持するかどうか
-   * @default false
-   */
-  keepWorkspaceDeps?: boolean;
 };
 
-const WORKSPACE_DEPS = /^(?:\*|workspace:.+|portal:.+)$/;
+const WORKSPACE_DEP = /^(?:\*|workspace:.*|portal:.*|link:.*)$/;
 
 /**
  * package.jsonから継承するプロパティのリスト
@@ -71,16 +71,18 @@ const INHERIT_PROPS = [
   'type',
   'engines',
   'keywords',
+  'sideEffects',
+  'peerDependenciesMeta',
 ] as const;
 
 /**
  * package.jsonから依存関係として参照するプロパティ
  */
 const DEPENDENCIES_PROP_NAMES = [
-  { dev: 'dependencies', dist: 'dependencies' },
-  { dev: 'peerDependencies', dist: 'peerDependencies' },
-  { dev: 'optionalDependencies', dist: 'optionalDependencies' },
-  { dev: 'devDependencies', dist: 'dependencies' },
+  { dev: 'dependencies', dist: 'dependencies', filter: true },
+  { dev: 'peerDependencies', dist: 'peerDependencies', filter: false },
+  { dev: 'optionalDependencies', dist: 'optionalDependencies', filter: true },
+  { dev: 'devDependencies', dist: 'dependencies', filter: true },
 ] as const;
 
 /**
@@ -94,7 +96,7 @@ export default function distPackage(options: DistPackageOptions = {}): Plugin {
     packagesDir = '..',
     outputDir,
     processor = (pkgJson) => pkgJson,
-    keepWorkspaceDeps = false,
+    resolveWorkspaceDeps = false,
   } = options;
   const imports = new Set<string>();
   const inputDirPath = path.normalize(path.resolve(inputDir));
@@ -102,11 +104,14 @@ export default function distPackage(options: DistPackageOptions = {}): Plugin {
   return {
     name: 'dist-package',
     moduleParsed: (moduleInfo) => {
-      const importedIds = moduleInfo.importedIds || [];
+      const importedIds = [
+        ...(moduleInfo.importedIds || []),
+        ...(moduleInfo.dynamicallyImportedIds || []),
+      ];
       for (const importedId of importedIds) {
         if (
           !importedId.startsWith(inputDirPath) &&
-          !inputDirPath.startsWith('_')
+          !importedId.startsWith('\0')
         ) {
           // バンドルされるモジュール内でimportしている外部ライブラリを全て取得
           imports.add(importedId);
@@ -132,12 +137,13 @@ export default function distPackage(options: DistPackageOptions = {}): Plugin {
 
       // dependencies関連の項目を処理
       const allDeps = new Set<string>();
-      for (const { dev, dist } of DEPENDENCIES_PROP_NAMES) {
+      for (const { dev, dist, filter } of DEPENDENCIES_PROP_NAMES) {
         const dependencies = _createDependencies(
           orgPackageJson[dev] as Record<string, string>,
           imports,
           packagesDir,
-          keepWorkspaceDeps,
+          resolveWorkspaceDeps,
+          filter,
         );
         if (dependencies) {
           const pkgs: Record<string, string> = {};
@@ -182,6 +188,36 @@ export default function distPackage(options: DistPackageOptions = {}): Plugin {
 }
 
 /**
+ * workspace:/portal:/link: のバージョン指定子を実バージョンに解決する
+ * @param specifier 元のバージョン指定子
+ * @param packageVersion パッケージの実バージョン
+ * @returns 解決後のバージョン文字列
+ */
+function _resolveWorkspaceVersion(
+  specifier: string,
+  packageVersion: string,
+): string {
+  if (specifier === '*') {
+    return packageVersion;
+  }
+
+  const wsMatch = specifier.match(/^workspace:(.*)$/);
+  if (wsMatch) {
+    const range = wsMatch[1];
+    if (range === '*' || range === '') {
+      return packageVersion;
+    }
+    if (range === '^' || range === '~') {
+      return `${range}${packageVersion}`;
+    }
+    return range;
+  }
+
+  // portal:, link:
+  return packageVersion;
+}
+
+/**
  * ワークスペース内のパッケージのバージョンを取得する
  * @param packagesDir 他のパッケージが配置されているディレクトリの相対パス
  * @return パッケージ名をキー、バージョンを値としたレコード
@@ -204,31 +240,38 @@ function _getPckageVersions(packagesDir: string) {
  * @param orgDependencies 元のpackage.jsonの依存関係
  * @param imports 全ソースの外部ライブラリへのimport情報
  * @param packagesDir ワークスページのパッケージの保存先ディレクトリ
- * @param keepWorkspaceDeps ワークスペースの依存関係を保持するかどうか
+ * @param resolveWorkspaceDeps ワークスペースの依存関係を解決するかどうか
  * @returns 依存関係
  */
 function _createDependencies(
   orgDependencies: Record<string, string>,
   imports: Set<string>,
   packagesDir: string,
-  keepWorkspaceDeps: boolean,
+  resolveWorkspaceDeps: boolean,
+  filter: boolean,
 ) {
-  // 全てのimportの中から、開発時用のpackage.jsonのdependenciesに含まれる外部のパッケージを取得
+  // peerDependenciesはimportフィルタをかけず全て含める(型のみのimportやAPI経由利用のケースがあるため)
+  // それ以外はimportしているパッケージのみに絞り込む
   const dependencies = orgDependencies
-    ? _getExternalDependencies(imports, orgDependencies)
+    ? filter
+      ? _getExternalDependencies(imports, orgDependencies)
+      : { ...orgDependencies }
     : {};
 
-  if (!keepWorkspaceDeps) {
+  if (resolveWorkspaceDeps) {
     // ワークスペース内のdependenciesは実際のバージョンに置き換え
     let versions;
     for (const pkg in dependencies) {
-      if (WORKSPACE_DEPS.test(dependencies[pkg])) {
+      if (WORKSPACE_DEP.test(dependencies[pkg])) {
         if (!versions) {
           versions = _getPckageVersions(packagesDir);
         }
         const version = versions[pkg];
         if (version) {
-          dependencies[pkg] = version;
+          dependencies[pkg] = _resolveWorkspaceVersion(
+            dependencies[pkg],
+            version,
+          );
         }
       }
     }

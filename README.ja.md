@@ -49,7 +49,7 @@ export default {
 
 - `string[]`
 - 元の `package.json` から継承するプロパティを指定します。
-- デフォルト: `['name', 'version', 'description', 'repository', 'bugs', 'homepage', 'author', 'contributors', 'license', 'type', 'engines', 'keywords']`
+- デフォルト: `['name', 'version', 'description', 'repository', 'bugs', 'homepage', 'author', 'contributors', 'license', 'type', 'engines', 'keywords', 'sideEffects', 'peerDependenciesMeta']`
 
 ### `inputDir`
 
@@ -61,6 +61,7 @@ export default {
 
 - `string | undefined`
 - ワークスペースのパッケージが格納されているディレクトリのパスを指定します。
+- `resolveWorkspaceDeps` が `true` のときに参照されます。
 - デフォルト: `'..'`
 
 ### `outputDir`
@@ -69,10 +70,40 @@ export default {
 - `package.json` の出力先ディレクトリを指定します。
 - デフォルト: `rollup` の `output` 設定から取得
 
+### `resolveWorkspaceDeps`
+
+- `boolean`
+- `true` にすると、各依存関係フィールド内の `workspace:` / `portal:` / `link:` 形式のバージョン指定を実際のバージョンに置き換えます。
+- pnpm ワークスペースを使用しない場合や、ビルド時にバージョンを確定させたい場合に使用します。
+- デフォルト: `false`
+
+置き換えのルールは以下の通りです。
+
+| 指定値                              | 置き換え後 (例: `1.2.3`) |
+| ----------------------------------- | ------------------------ |
+| `workspace:*` / `*`                 | `1.2.3`                  |
+| `workspace:^`                       | `^1.2.3`                 |
+| `workspace:~`                       | `~1.2.3`                 |
+| `workspace:^1.0.0` (明示バージョン) | `^1.0.0`                 |
+| `portal:../path` / `link:../path`   | `1.2.3`                  |
+
 ### `processor`
 
 - `(packageJson: PackageJson) => PackageJson`
 - 最終的に `package.json` を出力する前に加工処理を行います。
+
+## 依存関係の処理について
+
+各依存関係フィールドは以下のルールで dist/package.json に出力されます。
+
+| 開発用フィールド       | dist フィールド        | 対象                             |
+| ---------------------- | ---------------------- | -------------------------------- |
+| `dependencies`         | `dependencies`         | 実際に import したパッケージのみ |
+| `peerDependencies`     | `peerDependencies`     | 全エントリ（フィルタなし）       |
+| `optionalDependencies` | `optionalDependencies` | 実際に import したパッケージのみ |
+| `devDependencies`      | `dependencies`         | 実際に import したパッケージのみ |
+
+`peerDependencies` だけフィルタなしで全エントリを保持する理由は、`import type` のような型専用 import や、プラグイン API 経由で受け取るだけで直接 import しないケース（例: rollup プラグインが `rollup` 自体を peer に持つ場合）があるためです。
 
 ## ライセンス
 
