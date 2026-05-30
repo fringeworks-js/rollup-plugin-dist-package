@@ -223,10 +223,9 @@ function _resolveWorkspaceVersion(
  * @return パッケージ名をキー、バージョンを値としたレコード
  */
 function _getPckageVersions(packagesDir: string) {
-  const itemPaths = fg.globSync([
-    `${packagesDir}/**/package.json`,
-    `!${packagesDir}/**/node_modules/**/package.json`,
-  ]);
+  const itemPaths = fg.globSync(`${packagesDir}/**/package.json`, {
+    ignore: ['**/node_modules/**'],
+  });
   const versions: Record<string, string> = {};
   for (const itemPath of itemPaths) {
     const packageJson = fs.readJsonSync(itemPath);
