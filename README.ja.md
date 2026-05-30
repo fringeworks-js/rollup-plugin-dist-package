@@ -40,29 +40,22 @@ export default {
 
 ## オプション
 
-### `content`
-
-- `Partial<PackageJson>` または `(packageJson: PackageJson) => Partial<PackageJson>`
-- 生成する `package.json` の内容を指定できます。
-
 ### `inheritProps`
 
 - `string[]`
 - 元の `package.json` から継承するプロパティを指定します。
 - デフォルト: `['name', 'version', 'description', 'repository', 'bugs', 'homepage', 'author', 'contributors', 'license', 'type', 'engines', 'keywords', 'sideEffects', 'peerDependenciesMeta']`
 
+### `content`
+
+- `Partial<PackageJson>` または `(packageJson: PackageJson) => Partial<PackageJson>`
+- 生成する `package.json` の内容を指定できます。
+
 ### `inputDir`
 
 - `string | undefined`
 - 元の `package.json` のあるディレクトリを指定します。
 - デフォルト: カレントディレクトリ
-
-### `packagesDir`
-
-- `string | undefined`
-- ワークスペースのパッケージが格納されているディレクトリのパスを指定します。
-- `resolveWorkspaceDeps` が `true` のときに参照されます。
-- デフォルト: `'..'`
 
 ### `outputDir`
 
@@ -86,6 +79,13 @@ export default {
 | `workspace:~`                       | `~1.2.3`                 |
 | `workspace:^1.0.0` (明示バージョン) | `^1.0.0`                 |
 | `portal:../path` / `link:../path`   | `1.2.3`                  |
+
+### `packagesDir`
+
+- `string | undefined`
+- ワークスペースのパッケージが格納されているディレクトリのパスを指定します。
+- `resolveWorkspaceDeps` が `true` のときに参照されます。
+- デフォルト: `'..'`
 
 ### `processor`
 

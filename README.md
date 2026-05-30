@@ -39,29 +39,22 @@ export default {
 
 ## Options
 
-### `content`
-
-- `Partial<PackageJson>` or `(packageJson: PackageJson) => Partial<PackageJson>`
-- Specifies the content of the generated `package.json`.
-
 ### `inheritProps`
 
 - `string[]`
 - Specifies properties to inherit from the original `package.json`.
 - Default: `['name', 'version', 'description', 'repository', 'bugs', 'homepage', 'author', 'contributors', 'license', 'type', 'engines', 'keywords', 'sideEffects', 'peerDependenciesMeta']`
 
+### `content`
+
+- `Partial<PackageJson>` or `(packageJson: PackageJson) => Partial<PackageJson>`
+- Specifies the content of the generated `package.json`.
+
 ### `inputDir`
 
 - `string | undefined`
 - Specifies the directory where the original `package.json` is located.
 - Default: Current directory
-
-### `packagesDir`
-
-- `string | undefined`
-- Specifies the path to the directory containing workspace packages.
-- Referenced when `resolveWorkspaceDeps` is `true`.
-- Default: `'..'`
 
 ### `outputDir`
 
@@ -85,6 +78,13 @@ Replacement rules are as follows:
 | `workspace:~`                         | `~1.2.3`              |
 | `workspace:^1.0.0` (explicit version) | `^1.0.0`              |
 | `portal:../path` / `link:../path`     | `1.2.3`               |
+
+### `packagesDir`
+
+- `string | undefined`
+- Specifies the path to the directory containing workspace packages.
+- Referenced when `resolveWorkspaceDeps` is `true`.
+- Default: `'..'`
 
 ### `processor`
 
