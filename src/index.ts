@@ -224,7 +224,8 @@ function _resolveWorkspaceVersion(
  */
 function _getPckageVersions(packagesDir: string) {
   const itemPaths = fg.globSync(`${packagesDir}/**/package.json`, {
-    ignore: ['**/node_modules/**'],
+    ignore: ['**/node_modules', '**/node_modules/**'],
+    followSymbolicLinks: false,
   });
   const versions: Record<string, string> = {};
   for (const itemPath of itemPaths) {

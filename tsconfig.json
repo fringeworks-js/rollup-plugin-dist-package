@@ -40,5 +40,5 @@
     "strictPropertyInitialization": false,
     "preserveSymlinks": false
   },
-  "include": ["./src/**/*"]
+  "include": ["./src/**/*", "globals.d.ts"]
 }
