@@ -1,7 +1,7 @@
-# @niche-works/rollup-plugin-dist-package
+# @fringeworks/rollup-plugin-dist-package
 
 インポートパスを整理するために、ディストリビューション固有の `package.json` ファイルを生成するニッチなプラグインです。  
-`@niche-works/rollup-plugin-dist-package` は、Rollup のビルドプロセス中に `package.json` を編集し、  
+`@fringeworks/rollup-plugin-dist-package` は、Rollup のビルドプロセス中に `package.json` を編集し、  
 出力ディレクトリに適切な形式で出力します。  
 npmへ公開する`package.json`に最低限の項目のみ出力すること、  
 及びフラットなディレクトリ構成でライブラリを公開することへの補助を目的に作成されました。
@@ -11,7 +11,7 @@ npmへ公開する`package.json`に最低限の項目のみ出力すること、
 ## インストール
 
 ```sh
-npm install @niche-works/rollup-plugin-dist-package --save-dev
+npm install @fringeworks/rollup-plugin-dist-package --save-dev
 ```
 
 ## 使い方
@@ -19,7 +19,7 @@ npm install @niche-works/rollup-plugin-dist-package --save-dev
 `rollup.config.js` に以下のように設定してください。
 
 ```js
-import distPackage from '@niche-works/rollup-plugin-dist-package';
+import distPackage from '@fringeworks/rollup-plugin-dist-package';
 
 export default {
   input: 'src/index.ts',

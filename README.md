@@ -1,7 +1,7 @@
-# @niche-works/rollup-plugin-dist-package
+# @fringeworks/rollup-plugin-dist-package
 
 A niche plugin for generating distribution-specific package.json files to maintain clean import paths.  
-`@niche-works/rollup-plugin-dist-package` edits `package.json` during the Rollup build process and outputs it to the output directory in the appropriate format.  
+`@fringeworks/rollup-plugin-dist-package` edits `package.json` during the Rollup build process and outputs it to the output directory in the appropriate format.  
 It was created with the goal of outputting only the minimum required fields in the `package.json` for publishing to npm,  
 as well as assisting in publishing the library with a flat directory structure.
 
@@ -10,7 +10,7 @@ as well as assisting in publishing the library with a flat directory structure.
 ## Installation
 
 ```sh
-npm install @niche-works/rollup-plugin-dist-package --save-dev
+npm install @fringeworks/rollup-plugin-dist-package --save-dev
 ```
 
 ## Usage
@@ -18,7 +18,7 @@ npm install @niche-works/rollup-plugin-dist-package --save-dev
 Configure it in `rollup.config.js` as follows:
 
 ```js
-import distPackage from '@niche-works/rollup-plugin-dist-package';
+import distPackage from '@fringeworks/rollup-plugin-dist-package';
 
 export default {
   input: 'src/index.ts',
