@@ -1,4 +1,3 @@
-import fg from 'fast-glob';
 import fs from 'fs-extra';
 import path from 'path';
 import type { NormalizedOutputOptions, OutputBundle, Plugin } from 'rollup';
@@ -41,6 +40,12 @@ export type DistPackageOptions = {
   resolveWorkspaceDeps?: boolean;
 
   /**
+   * ワークスペース内の依存関係を解決しバージョンに置き換える際、\
+   * レンジが指定されていなかった場合に付与する記号
+   */
+  range?: VersionRange;
+
+  /**
    * ワークスペースの場合
    * パッケージが置かれているディレクトリのパス
    * @default '..'
@@ -52,6 +57,8 @@ export type DistPackageOptions = {
    */
   processor?: (packageJson: PackageJson) => PackageJson;
 };
+
+type VersionRange = '^' | '~' | null | undefined;
 
 const WORKSPACE_DEP = /^(?:\*|workspace:.*|portal:.*|link:.*)$/;
 
@@ -97,6 +104,7 @@ export default function distPackage(options: DistPackageOptions = {}): Plugin {
     outputDir,
     processor = (pkgJson) => pkgJson,
     resolveWorkspaceDeps = false,
+    range,
   } = options;
   const imports = new Set<string>();
   const inputDirPath = path.normalize(path.resolve(inputDir));
@@ -143,6 +151,7 @@ export default function distPackage(options: DistPackageOptions = {}): Plugin {
           imports,
           packagesDir,
           resolveWorkspaceDeps,
+          range,
           filter,
         );
         if (dependencies) {
@@ -191,16 +200,21 @@ export default function distPackage(options: DistPackageOptions = {}): Plugin {
  * workspace:/portal:/link: のバージョン指定子を実バージョンに解決する
  * @param specifier 元のバージョン指定子
  * @param packageVersion パッケージの実バージョン
+ * @param versionRange バージョンのレンジ
  * @returns 解決後のバージョン文字列
  */
 function _resolveWorkspaceVersion(
   specifier: string,
   packageVersion: string,
+  versionRange: VersionRange,
 ): string {
   if (specifier === '*') {
     return packageVersion;
   }
 
+  if (versionRange) {
+    return `${versionRange}${packageVersion}`;
+  }
   const wsMatch = specifier.match(/^workspace:(.*)$/);
   if (wsMatch) {
     const range = wsMatch[1];
@@ -218,15 +232,40 @@ function _resolveWorkspaceVersion(
 }
 
 /**
+ * ディレクトリ配下のパッケージのpackage.jsonのパスを収集する
+ * package.jsonがあるディレクトリをパッケージとみなし、その中には潜らない(dist等の出力物を拾わないため)
+ * node_modules・ドットで始まるディレクトリ・シンボリックリンクは対象外
+ * @param dir 探索するディレクトリのパス
+ * @returns package.jsonのパスのリスト
+ */
+function _findPackageJsonPaths(dir: string): string[] {
+  const paths: string[] = [];
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (
+      !entry.isDirectory() ||
+      entry.name === 'node_modules' ||
+      entry.name.startsWith('.')
+    ) {
+      continue;
+    }
+    const subDir = path.join(dir, entry.name);
+    const packageJsonPath = path.join(subDir, 'package.json');
+    if (fs.existsSync(packageJsonPath)) {
+      paths.push(packageJsonPath);
+    } else {
+      paths.push(..._findPackageJsonPaths(subDir));
+    }
+  }
+  return paths;
+}
+
+/**
  * ワークスペース内のパッケージのバージョンを取得する
  * @param packagesDir 他のパッケージが配置されているディレクトリの相対パス
  * @return パッケージ名をキー、バージョンを値としたレコード
  */
 function _getPckageVersions(packagesDir: string) {
-  const itemPaths = fg.globSync(`${packagesDir}/**/package.json`, {
-    ignore: ['**/node_modules', '**/node_modules/**'],
-    followSymbolicLinks: false,
-  });
+  const itemPaths = _findPackageJsonPaths(packagesDir);
   const versions: Record<string, string> = {};
   for (const itemPath of itemPaths) {
     const packageJson = fs.readJsonSync(itemPath);
@@ -248,6 +287,7 @@ function _createDependencies(
   imports: Set<string>,
   packagesDir: string,
   resolveWorkspaceDeps: boolean,
+  range: VersionRange,
   filter: boolean,
 ) {
   // peerDependenciesはimportフィルタをかけず全て含める(型のみのimportやAPI経由利用のケースがあるため)
@@ -271,6 +311,7 @@ function _createDependencies(
           dependencies[pkg] = _resolveWorkspaceVersion(
             dependencies[pkg],
             version,
+            range,
           );
         }
       }

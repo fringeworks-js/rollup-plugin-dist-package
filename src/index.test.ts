@@ -1,4 +1,3 @@
-import fg from 'fast-glob';
 import fs from 'fs-extra';
 import path from 'path';
 import type { NormalizedOutputOptions } from 'rollup';
@@ -9,17 +8,43 @@ vi.mock('fs-extra', () => ({
     readJsonSync: vi.fn(),
     writeJsonSync: vi.fn(),
     ensureDirSync: vi.fn(),
-  },
-}));
-
-vi.mock('fast-glob', () => ({
-  default: {
-    globSync: vi.fn(),
+    readdirSync: vi.fn(),
+    existsSync: vi.fn(),
   },
 }));
 
 const mockFs = vi.mocked(fs);
-const mockFg = vi.mocked(fg);
+
+/**
+ * readdirSync/existsSyncが参照する仮想のディレクトリ構成を設定する
+ * @param files ファイルのパスのリスト
+ * @param symlinks シンボリックリンクとして扱うディレクトリのパスのリスト
+ */
+function mockFileTree(files: string[], symlinks: string[] = []) {
+  const normalized = new Set(files.map((file) => path.normalize(file)));
+  mockFs.existsSync.mockImplementation((filePath) =>
+    normalized.has(path.normalize(filePath as string)),
+  );
+  mockFs.readdirSync.mockImplementation(((dir: string) => {
+    const prefix = path.normalize(dir) + path.sep;
+    const entries = new Map<string, boolean>();
+    for (const file of [...normalized, ...symlinks.map(path.normalize)]) {
+      if (file.startsWith(prefix)) {
+        const rest = file.slice(prefix.length).split(path.sep);
+        entries.set(rest[0], entries.get(rest[0]) || rest.length > 1);
+      }
+    }
+    return [...entries].map(([name, hasChildren]) => {
+      const isSymlink = symlinks
+        .map(path.normalize)
+        .includes(path.join(path.normalize(dir), name));
+      return {
+        name,
+        isDirectory: () => hasChildren && !isSymlink,
+      };
+    });
+  }) as any);
+}
 
 const OUTPUT_DIR = '/test/dist';
 
@@ -46,7 +71,7 @@ async function callGenerateBundle(
 describe('distPackage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockFg.globSync.mockReturnValue([]);
+    mockFileTree([]);
   });
 
   it('プラグイン名はdist-packageである', () => {
@@ -293,9 +318,9 @@ describe('distPackage', () => {
         resolveWorkspaceDeps: true,
         packagesDir: 'packages',
       });
-      mockFg.globSync.mockReturnValue(['packages/pkg-a/package.json']);
+      mockFileTree(['packages/pkg-a/package.json']);
       mockFs.readJsonSync.mockImplementation((filePath) => {
-        if (filePath === 'packages/pkg-a/package.json') {
+        if (filePath === path.join('packages', 'pkg-a', 'package.json')) {
           return { name: 'pkg-a', version: '1.2.3' };
         }
         return { dependencies: { 'pkg-a': specifier } };
@@ -328,6 +353,78 @@ describe('distPackage', () => {
       resolveTest('portal:./local', '1.2.3'));
     it('link:./local → 実バージョン', () =>
       resolveTest('link:./local', '1.2.3'));
+
+    describe('パッケージの探索', () => {
+      async function resolveVersions(
+        files: Record<string, { name: string; version: string }>,
+        symlinks: string[] = [],
+      ) {
+        const plugin = distPackage({
+          outputDir: OUTPUT_DIR,
+          resolveWorkspaceDeps: true,
+          packagesDir: 'packages',
+        });
+        mockFileTree(Object.keys(files), symlinks);
+        const packageJsons = new Map(
+          Object.entries(files).map(([file, json]) => [
+            path.normalize(file),
+            json,
+          ]),
+        );
+        mockFs.readJsonSync.mockImplementation(
+          (filePath) =>
+            packageJsons.get(path.normalize(filePath as string)) ?? {
+              dependencies: { 'pkg-a': '*', 'pkg-b': '*' },
+            },
+        );
+        callModuleParsed(plugin, ['pkg-a', 'pkg-b']);
+        await callGenerateBundle(plugin);
+        return getWrittenPackageJson().dependencies as Record<string, string>;
+      }
+
+      it('ネストしたディレクトリのパッケージも見つける', async () => {
+        const deps = await resolveVersions({
+          'packages/pkg-a/package.json': { name: 'pkg-a', version: '1.0.0' },
+          'packages/group/pkg-b/package.json': {
+            name: 'pkg-b',
+            version: '2.0.0',
+          },
+        });
+        expect(deps).toEqual({ 'pkg-a': '1.0.0', 'pkg-b': '2.0.0' });
+      });
+
+      it('パッケージの中(dist等)のpackage.jsonは参照しない', async () => {
+        const deps = await resolveVersions({
+          'packages/pkg-a/package.json': { name: 'pkg-a', version: '1.0.0' },
+          'packages/pkg-a/dist/package.json': {
+            name: 'pkg-a',
+            version: '0.9.0',
+          },
+        });
+        expect(deps['pkg-a']).toBe('1.0.0');
+      });
+
+      it('node_modules・ドットで始まるディレクトリ・シンボリックリンクは探索しない', async () => {
+        const deps = await resolveVersions(
+          {
+            'packages/node_modules/pkg-a/package.json': {
+              name: 'pkg-a',
+              version: '1.0.0',
+            },
+            'packages/.cache/pkg-a/package.json': {
+              name: 'pkg-a',
+              version: '1.0.0',
+            },
+            'packages/linked/pkg-b/package.json': {
+              name: 'pkg-b',
+              version: '2.0.0',
+            },
+          },
+          ['packages/linked'],
+        );
+        expect(deps).toEqual({ 'pkg-a': '*', 'pkg-b': '*' });
+      });
+    });
   });
 
   // -------------------------

@@ -1,6 +1,6 @@
 # @fringeworks/rollup-plugin-dist-package
 
-A niche plugin for generating distribution-specific package.json files to maintain clean import paths.  
+`@fringeworks/rollup-plugin-dist-package` is a plugin some will find handy, generating distribution-specific package.json files to maintain clean import paths.  
 `@fringeworks/rollup-plugin-dist-package` edits `package.json` during the Rollup build process and outputs it to the output directory in the appropriate format.  
 It was created with the goal of outputting only the minimum required fields in the `package.json` for publishing to npm,  
 as well as assisting in publishing the library with a flat directory structure.
