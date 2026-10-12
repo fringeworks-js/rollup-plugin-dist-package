@@ -156,9 +156,9 @@ export default function distPackage(options: DistPackageOptions = {}): Plugin {
         );
         if (dependencies) {
           const pkgs: Record<string, string> = {};
-          for (const pkg in dependencies) {
+          for (const [pkg, version] of Object.entries(dependencies)) {
             if (!allDeps.has(pkg)) {
-              pkgs[pkg] = dependencies[pkg];
+              pkgs[pkg] = version;
               allDeps.add(pkg);
             }
           }
@@ -217,7 +217,8 @@ function _resolveWorkspaceVersion(
   }
   const wsMatch = specifier.match(/^workspace:(.*)$/);
   if (wsMatch) {
-    const range = wsMatch[1];
+    // (.*) は必ずマッチする
+    const range = wsMatch[1]!;
     if (range === '*' || range === '') {
       return packageVersion;
     }
@@ -301,15 +302,15 @@ function _createDependencies(
   if (resolveWorkspaceDeps) {
     // ワークスペース内のdependenciesは実際のバージョンに置き換え
     let versions;
-    for (const pkg in dependencies) {
-      if (WORKSPACE_DEP.test(dependencies[pkg])) {
+    for (const [pkg, specifier] of Object.entries(dependencies)) {
+      if (WORKSPACE_DEP.test(specifier)) {
         if (!versions) {
           versions = _getPckageVersions(packagesDir);
         }
         const version = versions[pkg];
         if (version) {
           dependencies[pkg] = _resolveWorkspaceVersion(
-            dependencies[pkg],
+            specifier,
             version,
             range,
           );
@@ -343,7 +344,7 @@ function _getExternalDependencies(
     for (let i = tokens.length; 0 < i; i--) {
       const pkg = tokens.slice(0, i).join('/');
       if (pkg in orgDependencies) {
-        dependencies[pkg] = orgDependencies[pkg];
+        dependencies[pkg] = orgDependencies[pkg]!;
         break;
       }
     }

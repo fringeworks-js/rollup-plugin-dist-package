@@ -31,7 +31,9 @@ function mockFileTree(files: string[], symlinks: string[] = []) {
     for (const file of [...normalized, ...symlinks.map(path.normalize)]) {
       if (file.startsWith(prefix)) {
         const rest = file.slice(prefix.length).split(path.sep);
-        entries.set(rest[0], entries.get(rest[0]) || rest.length > 1);
+        // split の結果は必ず1つ以上ある
+        const name = rest[0]!;
+        entries.set(name, entries.get(name) || rest.length > 1);
       }
     }
     return [...entries].map(([name, hasChildren]) => {
@@ -50,7 +52,7 @@ const OUTPUT_DIR = '/test/dist';
 
 function getWrittenPackageJson(): Record<string, unknown> {
   const calls = mockFs.writeJsonSync.mock.calls;
-  return calls[calls.length - 1][1] as Record<string, unknown>;
+  return calls[calls.length - 1]![1] as Record<string, unknown>;
 }
 
 function callModuleParsed(
@@ -452,7 +454,7 @@ describe('distPackage', () => {
       mockFs.readJsonSync.mockReturnValue({});
       await callGenerateBundle(plugin, { dir: '/other' });
 
-      expect(mockFs.writeJsonSync.mock.calls[0][0]).toContain(
+      expect(mockFs.writeJsonSync.mock.calls[0]![0]).toContain(
         path.normalize('/custom/dist'),
       );
     });
@@ -462,7 +464,7 @@ describe('distPackage', () => {
       mockFs.readJsonSync.mockReturnValue({});
       await callGenerateBundle(plugin, { dir: '/from-rollup' });
 
-      expect(mockFs.writeJsonSync.mock.calls[0][0]).toContain(
+      expect(mockFs.writeJsonSync.mock.calls[0]![0]).toContain(
         path.normalize('/from-rollup'),
       );
     });
@@ -472,7 +474,7 @@ describe('distPackage', () => {
       mockFs.readJsonSync.mockReturnValue({});
       await callGenerateBundle(plugin, { file: '/build/bundle/index.js' });
 
-      expect(mockFs.writeJsonSync.mock.calls[0][0]).toContain(
+      expect(mockFs.writeJsonSync.mock.calls[0]![0]).toContain(
         path.normalize('/build/bundle'),
       );
     });
