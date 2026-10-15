@@ -1,6 +1,6 @@
 import fs from 'fs-extra';
 import path from 'path';
-import type { NormalizedOutputOptions, OutputBundle, Plugin } from 'rollup';
+import type { Plugin } from 'rollup';
 import sortPackageJson from 'sort-package-json';
 import type { PackageJson } from 'type-fest';
 
@@ -10,12 +10,13 @@ import type { PackageJson } from 'type-fest';
 export type DistPackageOptions = {
   /**
    * 元のpackage.jsonから引き継ぐ項目
-   * @default ['name', 'version', 'description', 'repository', 'bugs', 'homepage', 'author', 'contributors', 'license', 'type', 'engines', 'keywords']
+   * @default ['name', 'version', 'description', 'repository', 'bugs', 'homepage', 'author', 'contributors', 'license', 'type', 'engines', 'keywords', 'sideEffects', 'peerDependenciesMeta']
    */
-  inheritProps?: string[];
+  inheritProps?: readonly string[];
 
   /**
    * package.jsonに出力する内容
+   * 依存関係の項目に指定したパッケージは、元のpackage.jsonから収集した値より優先する
    */
   content?:
     | Partial<PackageJson>
@@ -29,7 +30,7 @@ export type DistPackageOptions = {
 
   /**
    * 出力先ディレクトリ
-   * 未指定の場合はrollupのoutput設定から取得
+   * 未指定の場合はrollupの出力先にアセットとして出力
    */
   outputDir?: string;
 
@@ -43,11 +44,11 @@ export type DistPackageOptions = {
    * ワークスペース内の依存関係を解決しバージョンに置き換える際、\
    * レンジが指定されていなかった場合に付与する記号
    */
-  range?: VersionRange;
+  range?: VersionRange | null;
 
   /**
    * ワークスペースの場合
-   * パッケージが置かれているディレクトリのパス
+   * パッケージが置かれているディレクトリのパス(inputDirからの相対パス)
    * @default '..'
    */
   packagesDir?: string;
@@ -58,7 +59,12 @@ export type DistPackageOptions = {
   processor?: (packageJson: PackageJson) => PackageJson;
 };
 
-type VersionRange = '^' | '~' | null | undefined;
+/**
+ * バージョンのレンジを表す記号
+ */
+export type VersionRange = '^' | '~';
+
+type Dependencies = Partial<Record<string, string>>;
 
 const WORKSPACE_DEP = /^(?:\*|workspace:.*|portal:.*|link:.*)$/;
 
@@ -93,6 +99,15 @@ const DEPENDENCIES_PROP_NAMES = [
 ] as const;
 
 /**
+ * 出力するpackage.jsonの依存関係のプロパティ
+ */
+const DIST_DEPENDENCIES_PROP_NAMES = [
+  'dependencies',
+  'peerDependencies',
+  'optionalDependencies',
+] as const;
+
+/**
  * package.jsonを編集しビルド結果のディレクトリに出力するプラグイン
  */
 export default function distPackage(options: DistPackageOptions = {}): Plugin {
@@ -106,33 +121,44 @@ export default function distPackage(options: DistPackageOptions = {}): Plugin {
     resolveWorkspaceDeps = false,
     range,
   } = options;
-  const imports = new Set<string>();
-  const inputDirPath = path.normalize(path.resolve(inputDir));
+  const inputDirPath = path.resolve(inputDir);
+  const packagesDirPath = path.resolve(inputDirPath, packagesDir);
+  // モジュールごとのimportしている外部パッケージ名
+  // tsdownは複数のビルドでプラグインを共有し並列に実行するため、ビルド開始時にはクリアせず、
+  // 再解析されたモジュールは上書き、削除されたモジュールは除去する
+  const importsByModule = new Map<string, string[]>();
 
   return {
     name: 'dist-package',
-    moduleParsed: (moduleInfo) => {
-      const importedIds = [
+    moduleParsed(moduleInfo) {
+      const packageNames: string[] = [];
+      for (const importedId of [
         ...(moduleInfo.importedIds || []),
         ...(moduleInfo.dynamicallyImportedIds || []),
-      ];
-      for (const importedId of importedIds) {
-        if (
-          !importedId.startsWith(inputDirPath) &&
-          !importedId.startsWith('\0')
-        ) {
-          // バンドルされるモジュール内でimportしている外部ライブラリを全て取得
-          imports.add(importedId);
+      ]) {
+        const packageName = _getPackageName(importedId);
+        if (packageName) {
+          packageNames.push(packageName);
         }
       }
+      importsByModule.set(moduleInfo.id, packageNames);
     },
-    generateBundle: async (
-      outputOptions: NormalizedOutputOptions,
-      _: OutputBundle,
-    ) => {
+    watchChange(id, { event }) {
+      if (event === 'delete') {
+        importsByModule.delete(id);
+      }
+    },
+    generateBundle() {
+      const imports = new Set<string>();
+      for (const packageNames of importsByModule.values()) {
+        for (const packageName of packageNames) {
+          imports.add(packageName);
+        }
+      }
+
       // 開発時用のpackage.jsonを取得
-      const orgPackageJson = fs.readJsonSync(
-        path.join(inputDir, 'package.json'),
+      const orgPackageJson: PackageJson = fs.readJsonSync(
+        path.join(inputDirPath, 'package.json'),
         {
           encoding: 'utf8',
         },
@@ -143,93 +169,153 @@ export default function distPackage(options: DistPackageOptions = {}): Plugin {
           ? content(orgPackageJson)
           : { ...content };
 
+      // ワークスペース内のパッケージのバージョン(必要になった時点で1回だけ取得する)
+      let versions: Record<string, string> | undefined;
+      const getVersions = () =>
+        (versions ??= _getPackageVersions(packagesDirPath));
+
       // dependencies関連の項目を処理
+      // contentで指定したパッケージは収集の対象外にする
       const allDeps = new Set<string>();
+      for (const dist of DIST_DEPENDENCIES_PROP_NAMES) {
+        for (const pkg of Object.keys(packageJson[dist] ?? {})) {
+          allDeps.add(pkg);
+        }
+      }
       for (const { dev, dist, filter } of DEPENDENCIES_PROP_NAMES) {
         const dependencies = _createDependencies(
-          orgPackageJson[dev] as Record<string, string>,
+          orgPackageJson[dev],
           imports,
-          packagesDir,
-          resolveWorkspaceDeps,
-          range,
           filter,
         );
-        if (dependencies) {
-          const pkgs: Record<string, string> = {};
-          for (const [pkg, version] of Object.entries(dependencies)) {
-            if (!allDeps.has(pkg)) {
-              pkgs[pkg] = version;
-              allDeps.add(pkg);
-            }
+        const pkgs: Record<string, string> = {};
+        for (const [pkg, specifier] of dependencies) {
+          if (allDeps.has(pkg)) {
+            continue;
           }
-          if (Object.keys(pkgs).length) {
-            packageJson[dist] = {
-              ...packageJson[dist],
-              ...pkgs,
-            };
-          }
+          allDeps.add(pkg);
+          pkgs[pkg] = resolveWorkspaceDeps
+            ? _resolveWorkspaceDependency(
+                pkg,
+                specifier,
+                getVersions,
+                range,
+                (message) => this.warn(message),
+              )
+            : specifier;
+        }
+        if (Object.keys(pkgs).length) {
+          packageJson[dist] = {
+            ...packageJson[dist],
+            ...pkgs,
+          };
         }
       }
 
       // 指定のプロパティが未設定で、開発時用のpackage.jsonにあれば設定
-      if (inheritProps) {
-        for (const prop of inheritProps) {
-          if (!packageJson[prop] && orgPackageJson[prop]) {
-            packageJson[prop] = orgPackageJson[prop];
-          }
+      // sideEffects: false などの偽値も引き継ぐため、undefinedかどうかで判定する
+      for (const prop of inheritProps) {
+        if (
+          packageJson[prop] === undefined &&
+          orgPackageJson[prop] !== undefined
+        ) {
+          packageJson[prop] = orgPackageJson[prop];
         }
       }
 
-      // ビルド先に出力
-      const outputPath =
-        outputDir || outputOptions.dir || path.dirname(outputOptions.file!);
-      fs.ensureDirSync(outputPath);
-      fs.writeJsonSync(
-        path.join(outputPath, 'package.json'),
+      const source = `${JSON.stringify(
         sortPackageJson(processor(packageJson as PackageJson)),
-        {
+        null,
+        2,
+      )}\n`;
+
+      if (outputDir) {
+        // 指定されたディレクトリに出力
+        fs.outputFileSync(path.join(outputDir, 'package.json'), source, {
           encoding: 'utf8',
-          spaces: 2,
-        },
-      );
+        });
+      } else {
+        // rollupの出力先にアセットとして出力
+        // output.fileの場合もそのディレクトリに出力される
+        this.emitFile({ type: 'asset', fileName: 'package.json', source });
+      }
     },
   };
 }
 
 /**
+ * importしたモジュールのIDからパッケージ名を取得する
+ * パッケージ名で指定されたもの(bare specifier)のみを対象とし、
+ * 相対パス・絶対パス・\0始まりの仮想モジュールは対象外とする
+ * (バンドルされたモジュールと外部モジュールを区別できないため)
+ * @param id モジュールのID
+ * @returns パッケージ名
+ */
+function _getPackageName(id: string): string | undefined {
+  if (id.startsWith('\0') || id.startsWith('.') || path.isAbsolute(id)) {
+    return undefined;
+  }
+  const tokens = id.split('/');
+  return id.startsWith('@') ? tokens.slice(0, 2).join('/') : tokens[0];
+}
+
+/**
+ * ワークスペース内の依存関係のバージョン指定子を実バージョンに解決する
+ * ワークスペース内の依存関係でない場合、パッケージが見つからない場合はそのまま返す
+ * @param pkg パッケージ名
+ * @param specifier 元のバージョン指定子
+ * @param getVersions ワークスペース内のパッケージのバージョンを取得する関数
+ * @param range レンジが指定されていなかった場合に付与する記号
+ * @param warn 警告を出力する関数
+ * @returns 解決後のバージョン文字列
+ */
+function _resolveWorkspaceDependency(
+  pkg: string,
+  specifier: string,
+  getVersions: () => Record<string, string>,
+  range: VersionRange | null | undefined,
+  warn: (message: string) => void,
+): string {
+  if (!WORKSPACE_DEP.test(specifier)) {
+    return specifier;
+  }
+  const version = getVersions()[pkg];
+  if (!version) {
+    // '*' はワークスペース外のパッケージにも使われるため警告しない
+    if (specifier !== '*') {
+      warn(
+        `"${pkg}": "${specifier}" was not found in the workspace and is output as is.`,
+      );
+    }
+    return specifier;
+  }
+  return _resolveWorkspaceVersion(specifier, version, range);
+}
+
+/**
  * workspace:/portal:/link: のバージョン指定子を実バージョンに解決する
+ * 指定子に明示されたレンジを優先し、明示されていない場合のみrangeを付与する
  * @param specifier 元のバージョン指定子
  * @param packageVersion パッケージの実バージョン
- * @param versionRange バージョンのレンジ
+ * @param range レンジが指定されていなかった場合に付与する記号
  * @returns 解決後のバージョン文字列
  */
 function _resolveWorkspaceVersion(
   specifier: string,
   packageVersion: string,
-  versionRange: VersionRange,
+  range: VersionRange | null | undefined,
 ): string {
-  if (specifier === '*') {
-    return packageVersion;
-  }
-
-  if (versionRange) {
-    return `${versionRange}${packageVersion}`;
-  }
   const wsMatch = specifier.match(/^workspace:(.*)$/);
-  if (wsMatch) {
-    // (.*) は必ずマッチする
-    const range = wsMatch[1]!;
-    if (range === '*' || range === '') {
-      return packageVersion;
-    }
-    if (range === '^' || range === '~') {
-      return `${range}${packageVersion}`;
-    }
-    return range;
+  // (.*) は必ずマッチする
+  const explicitRange = wsMatch ? wsMatch[1]! : '';
+  if (explicitRange === '^' || explicitRange === '~') {
+    return `${explicitRange}${packageVersion}`;
   }
-
-  // portal:, link:
-  return packageVersion;
+  if (explicitRange !== '' && explicitRange !== '*') {
+    return explicitRange;
+  }
+  // *, workspace:*, workspace:, portal:, link:
+  return `${range ?? ''}${packageVersion}`;
 }
 
 /**
@@ -262,15 +348,16 @@ function _findPackageJsonPaths(dir: string): string[] {
 
 /**
  * ワークスペース内のパッケージのバージョンを取得する
- * @param packagesDir 他のパッケージが配置されているディレクトリの相対パス
+ * @param packagesDir 他のパッケージが配置されているディレクトリのパス
  * @return パッケージ名をキー、バージョンを値としたレコード
  */
-function _getPckageVersions(packagesDir: string) {
-  const itemPaths = _findPackageJsonPaths(packagesDir);
+function _getPackageVersions(packagesDir: string) {
   const versions: Record<string, string> = {};
-  for (const itemPath of itemPaths) {
-    const packageJson = fs.readJsonSync(itemPath);
-    versions[packageJson.name] = packageJson.version;
+  for (const itemPath of _findPackageJsonPaths(packagesDir)) {
+    const { name, version }: PackageJson = fs.readJsonSync(itemPath);
+    if (typeof name === 'string' && typeof version === 'string') {
+      versions[name] = version;
+    }
   }
   return versions;
 }
@@ -278,76 +365,22 @@ function _getPckageVersions(packagesDir: string) {
 /**
  * パッケージの依存関係を定義した項目を作成する
  * @param orgDependencies 元のpackage.jsonの依存関係
- * @param imports 全ソースの外部ライブラリへのimport情報
- * @param packagesDir ワークスページのパッケージの保存先ディレクトリ
- * @param resolveWorkspaceDeps ワークスペースの依存関係を解決するかどうか
- * @returns 依存関係
+ * @param imports 全ソースのimportしている外部パッケージ名
+ * @param filter importしているパッケージのみに絞り込むかどうか
+ * @returns パッケージ名とバージョン指定子の組のリスト
  */
 function _createDependencies(
-  orgDependencies: Record<string, string>,
+  orgDependencies: Dependencies | undefined,
   imports: Set<string>,
-  packagesDir: string,
-  resolveWorkspaceDeps: boolean,
-  range: VersionRange,
   filter: boolean,
-) {
+): [string, string][] {
   // peerDependenciesはimportフィルタをかけず全て含める(型のみのimportやAPI経由利用のケースがあるため)
   // それ以外はimportしているパッケージのみに絞り込む
-  const dependencies = orgDependencies
-    ? filter
-      ? _getExternalDependencies(imports, orgDependencies)
-      : { ...orgDependencies }
-    : {};
-
-  if (resolveWorkspaceDeps) {
-    // ワークスペース内のdependenciesは実際のバージョンに置き換え
-    let versions;
-    for (const [pkg, specifier] of Object.entries(dependencies)) {
-      if (WORKSPACE_DEP.test(specifier)) {
-        if (!versions) {
-          versions = _getPckageVersions(packagesDir);
-        }
-        const version = versions[pkg];
-        if (version) {
-          dependencies[pkg] = _resolveWorkspaceVersion(
-            specifier,
-            version,
-            range,
-          );
-        }
-      }
+  const dependencies: [string, string][] = [];
+  for (const [pkg, specifier] of Object.entries(orgDependencies ?? {})) {
+    if (specifier !== undefined && (!filter || imports.has(pkg))) {
+      dependencies.push([pkg, specifier]);
     }
   }
-
-  // dependenciesを返す
-  if (Object.keys(dependencies).length) {
-    return dependencies;
-  } else {
-    return undefined;
-  }
-}
-
-/**
- * 各ソースコードのimportの情報を基に\
- * 外部パッケージのみのdependenciesを取得する
- * @param imports importの情報
- * @param orgDependencies 元のpackage.jsonのdependencies
- * @return 外部パッケージのみのdependencies
- */
-function _getExternalDependencies(
-  imports: Set<string>,
-  orgDependencies: Record<string, string>,
-) {
-  const dependencies: Record<string, string> = {};
-  imports.forEach((item) => {
-    const tokens = item.split(/[/\\]/);
-    for (let i = tokens.length; 0 < i; i--) {
-      const pkg = tokens.slice(0, i).join('/');
-      if (pkg in orgDependencies) {
-        dependencies[pkg] = orgDependencies[pkg]!;
-        break;
-      }
-    }
-  });
   return dependencies;
 }

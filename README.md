@@ -37,59 +37,54 @@ export default {
 };
 ```
 
-## Options
+## API
 
-### `inheritProps`
+### `distPackage`
 
-- `string[]`
-- Specifies properties to inherit from the original `package.json`.
-- Default: `['name', 'version', 'description', 'repository', 'bugs', 'homepage', 'author', 'contributors', 'license', 'type', 'engines', 'keywords', 'sideEffects', 'peerDependenciesMeta']`
+```ts
+distPackage(options?: DistPackageOptions): Plugin
+```
 
-### `content`
+Creates a plugin that edits `package.json` and outputs it to the build output directory.
 
-- `Partial<PackageJson>` or `(packageJson: PackageJson) => Partial<PackageJson>`
-- Specifies the content of the generated `package.json`.
+| Parameter  | Type                 | Description       |
+| ---------- | -------------------- | ----------------- |
+| `options?` | `DistPackageOptions` | The options below |
 
-### `inputDir`
+| Option                  | Type                                                                           | Description                                                                                                                                                           |
+| ----------------------- | ------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `inheritProps?`         | `readonly string[]`                                                            | Properties to inherit from the original `package.json` when not set in `content`. Falsy values such as `sideEffects: false` are inherited as well. Default: see below |
+| `content?`              | `Partial<PackageJson> \| ((packageJson: PackageJson) => Partial<PackageJson>)` | Content of the generated `package.json`. Packages listed in its dependency fields take precedence over those collected from the original `package.json`               |
+| `inputDir?`             | `string`                                                                       | Directory where the original `package.json` is located. Default: current directory                                                                                    |
+| `outputDir?`            | `string`                                                                       | Output directory for `package.json`. If omitted, it is emitted as an asset into Rollup's output directory                                                             |
+| `resolveWorkspaceDeps?` | `boolean`                                                                      | Replaces `workspace:` / `portal:` / `link:` / `*` version specifiers with the actual versions of the workspace packages. Default: `false`                             |
+| `range?`                | `VersionRange \| null`                                                         | Range prefix added when `resolveWorkspaceDeps` replaces a specifier that has no explicit range                                                                        |
+| `packagesDir?`          | `string`                                                                       | Directory containing the workspace packages, relative to `inputDir`. Referenced when `resolveWorkspaceDeps` is `true`. Default: `'..'`                                |
+| `processor?`            | `(packageJson: PackageJson) => PackageJson`                                    | Processes the final `package.json` before output                                                                                                                      |
 
-- `string | undefined`
-- Specifies the directory where the original `package.json` is located.
-- Default: Current directory
+The default of `inheritProps` is `['name', 'version', 'description', 'repository', 'bugs', 'homepage', 'author', 'contributors', 'license', 'type', 'engines', 'keywords', 'sideEffects', 'peerDependenciesMeta']`.
 
-### `outputDir`
+#### Resolving workspace dependencies
 
-- `string | undefined`
-- Specifies the output directory for `package.json`.
-- Default: Retrieved from Rollup's `output` settings
+With `resolveWorkspaceDeps: true`, specifiers are replaced as follows (e.g. the package version is `1.2.3`).\
+An explicit range in the specifier takes precedence over `range`.
 
-### `resolveWorkspaceDeps`
+| Specifier                             | Result   | With `range: '^'` |
+| ------------------------------------- | -------- | ----------------- |
+| `workspace:*` / `workspace:` / `*`    | `1.2.3`  | `^1.2.3`          |
+| `portal:../path` / `link:../path`     | `1.2.3`  | `^1.2.3`          |
+| `workspace:^`                         | `^1.2.3` | `^1.2.3`          |
+| `workspace:~`                         | `~1.2.3` | `~1.2.3`          |
+| `workspace:^1.0.0` (explicit version) | `^1.0.0` | `^1.0.0`          |
 
-- `boolean`
-- When `true`, replaces `workspace:` / `portal:` / `link:` version specifiers in each dependency field with the actual resolved versions.
-- Use this when not using pnpm workspaces, or when you want versions to be resolved at build time.
-- Default: `false`
+If a package is not found in `packagesDir`, the specifier is output as is and a warning is issued (except for `*`, which is also used for packages outside the workspace).
 
-Replacement rules are as follows:
+### Types
 
-| Specifier                             | Result (e.g. `1.2.3`) |
-| ------------------------------------- | --------------------- |
-| `workspace:*` / `*`                   | `1.2.3`               |
-| `workspace:^`                         | `^1.2.3`              |
-| `workspace:~`                         | `~1.2.3`              |
-| `workspace:^1.0.0` (explicit version) | `^1.0.0`              |
-| `portal:../path` / `link:../path`     | `1.2.3`               |
-
-### `packagesDir`
-
-- `string | undefined`
-- Specifies the path to the directory containing workspace packages.
-- Referenced when `resolveWorkspaceDeps` is `true`.
-- Default: `'..'`
-
-### `processor`
-
-- `(packageJson: PackageJson) => PackageJson`
-- Processes the final `package.json` before output.
+| Type                 | Description                             |
+| -------------------- | --------------------------------------- |
+| `DistPackageOptions` | Options for `distPackage`               |
+| `VersionRange`       | Range prefix for `range` (`'^' \| '~'`) |
 
 ## How dependencies are processed
 
@@ -103,6 +98,8 @@ Each dependency field is written to dist/package.json according to the following
 | `devDependencies`      | `dependencies`         | Only packages actually imported |
 
 `peerDependencies` is preserved without filtering because peer dependencies may be used only as type imports (`import type`) or received solely through a plugin API without being directly imported (e.g. a rollup plugin that lists `rollup` itself as a peer dependency).
+
+Imports are detected from module specifiers written as package names (e.g. `react`, `lodash/merge`). Relative and absolute paths are not treated as packages, because bundled modules cannot be distinguished from external ones. When type declarations are built together (e.g. `dts: true` in tsdown), packages imported only as types are also included.
 
 ## License
 

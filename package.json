@@ -1,6 +1,6 @@
 {
   "name": "@fringeworks/rollup-plugin-dist-package",
-  "version": "0.8.2",
+  "version": "0.9.0",
   "description": "A plugin some will find handy, generating distribution-specific package.json files to maintain clean import paths.",
   "keywords": [
     "rollup",

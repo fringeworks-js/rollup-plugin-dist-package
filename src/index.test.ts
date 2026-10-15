@@ -1,13 +1,11 @@
 import fs from 'fs-extra';
 import path from 'path';
-import type { NormalizedOutputOptions } from 'rollup';
 import distPackage from './index';
 
 vi.mock('fs-extra', () => ({
   default: {
     readJsonSync: vi.fn(),
-    writeJsonSync: vi.fn(),
-    ensureDirSync: vi.fn(),
+    outputFileSync: vi.fn(),
     readdirSync: vi.fn(),
     existsSync: vi.fn(),
   },
@@ -21,14 +19,17 @@ const mockFs = vi.mocked(fs);
  * @param symlinks シンボリックリンクとして扱うディレクトリのパスのリスト
  */
 function mockFileTree(files: string[], symlinks: string[] = []) {
-  const normalized = new Set(files.map((file) => path.normalize(file)));
+  const normalized = new Set(files.map((file) => path.resolve(file)));
   mockFs.existsSync.mockImplementation((filePath) =>
-    normalized.has(path.normalize(filePath as string)),
+    normalized.has(path.resolve(filePath as string)),
   );
   mockFs.readdirSync.mockImplementation(((dir: string) => {
-    const prefix = path.normalize(dir) + path.sep;
+    const prefix = path.resolve(dir) + path.sep;
     const entries = new Map<string, boolean>();
-    for (const file of [...normalized, ...symlinks.map(path.normalize)]) {
+    for (const file of [
+      ...normalized,
+      ...symlinks.map((link) => path.resolve(link)),
+    ]) {
       if (file.startsWith(prefix)) {
         const rest = file.slice(prefix.length).split(path.sep);
         // split の結果は必ず1つ以上ある
@@ -38,8 +39,8 @@ function mockFileTree(files: string[], symlinks: string[] = []) {
     }
     return [...entries].map(([name, hasChildren]) => {
       const isSymlink = symlinks
-        .map(path.normalize)
-        .includes(path.join(path.normalize(dir), name));
+        .map((link) => path.resolve(link))
+        .includes(path.join(path.resolve(dir), name));
       return {
         name,
         isDirectory: () => hasChildren && !isSymlink,
@@ -50,24 +51,41 @@ function mockFileTree(files: string[], symlinks: string[] = []) {
 
 const OUTPUT_DIR = '/test/dist';
 
+const context = {
+  emitFile: vi.fn(),
+  warn: vi.fn(),
+};
+
 function getWrittenPackageJson(): Record<string, unknown> {
-  const calls = mockFs.writeJsonSync.mock.calls;
-  return calls[calls.length - 1]![1] as Record<string, unknown>;
+  const calls = mockFs.outputFileSync.mock.calls;
+  return JSON.parse(calls[calls.length - 1]![1] as string);
 }
+
+let moduleCount = 0;
 
 function callModuleParsed(
   plugin: ReturnType<typeof distPackage>,
   importedIds: string[],
   dynamicallyImportedIds: string[] = [],
+  id = `/project/src/module${moduleCount++}.ts`,
 ) {
-  (plugin.moduleParsed as any)({ importedIds, dynamicallyImportedIds });
+  (plugin.moduleParsed as any).call(context, {
+    id,
+    importedIds,
+    dynamicallyImportedIds,
+  });
 }
 
-async function callGenerateBundle(
+function callWatchChange(
   plugin: ReturnType<typeof distPackage>,
-  outputOptions: Partial<NormalizedOutputOptions> = { dir: OUTPUT_DIR },
+  id: string,
+  event: 'create' | 'update' | 'delete',
 ) {
-  await (plugin.generateBundle as any)(outputOptions, {});
+  (plugin.watchChange as any).call(context, id, { event });
+}
+
+async function callGenerateBundle(plugin: ReturnType<typeof distPackage>) {
+  await (plugin.generateBundle as any).call(context, {}, {});
 }
 
 describe('distPackage', () => {
@@ -97,13 +115,15 @@ describe('distPackage', () => {
       });
     });
 
-    it('inputDirパス配下の内部ファイルは収集しない', async () => {
-      const inputDir = '/project/src';
-      const plugin = distPackage({ inputDir, outputDir: OUTPUT_DIR });
+    it('相対パス・絶対パスのモジュールは収集しない', async () => {
+      const plugin = distPackage({ outputDir: OUTPUT_DIR });
       mockFs.readJsonSync.mockReturnValue({
         dependencies: { react: '^18.0.0' },
       });
-      callModuleParsed(plugin, [`${inputDir}/utils.ts`]);
+      callModuleParsed(plugin, [
+        './react',
+        path.resolve('/project/node_modules/react/index.js'),
+      ]);
       await callGenerateBundle(plugin);
 
       expect(getWrittenPackageJson()).not.toHaveProperty('dependencies');
@@ -206,6 +226,25 @@ describe('distPackage', () => {
       expect(result).toMatchObject({ name: 'my-pkg' });
       expect(result).not.toHaveProperty('version');
     });
+
+    it('sideEffects: falseのような偽値も引き継がれる', async () => {
+      const plugin = distPackage({ outputDir: OUTPUT_DIR });
+      mockFs.readJsonSync.mockReturnValue({ sideEffects: false });
+      await callGenerateBundle(plugin);
+
+      expect(getWrittenPackageJson()).toMatchObject({ sideEffects: false });
+    });
+
+    it('contentで設定した偽値はorgPackageJsonで上書きされない', async () => {
+      const plugin = distPackage({
+        outputDir: OUTPUT_DIR,
+        content: { sideEffects: false },
+      });
+      mockFs.readJsonSync.mockReturnValue({ sideEffects: ['*.css'] });
+      await callGenerateBundle(plugin);
+
+      expect(getWrittenPackageJson()).toMatchObject({ sideEffects: false });
+    });
   });
 
   // -------------------------
@@ -306,6 +345,50 @@ describe('distPackage', () => {
         dependencies: { '@scope/pkg': '^1.0.0' },
       });
     });
+
+    it('Objectのプロトタイプのプロパティ名にはマッチしない', async () => {
+      const plugin = distPackage({ outputDir: OUTPUT_DIR });
+      mockFs.readJsonSync.mockReturnValue({
+        dependencies: { react: '^18.0.0' },
+      });
+      callModuleParsed(plugin, ['toString', 'constructor']);
+      await callGenerateBundle(plugin);
+
+      expect(getWrittenPackageJson()).not.toHaveProperty('dependencies');
+    });
+
+    it('contentで指定した依存は収集した値より優先される', async () => {
+      const plugin = distPackage({
+        outputDir: OUTPUT_DIR,
+        content: { dependencies: { react: '^19.0.0' } },
+      });
+      mockFs.readJsonSync.mockReturnValue({
+        dependencies: { react: '^18.0.0', lodash: '^4.0.0' },
+      });
+      callModuleParsed(plugin, ['react', 'lodash']);
+      await callGenerateBundle(plugin);
+
+      expect(getWrittenPackageJson().dependencies).toEqual({
+        react: '^19.0.0',
+        lodash: '^4.0.0',
+      });
+    });
+
+    it('contentの別の依存関係の項目にあるパッケージは収集しない', async () => {
+      const plugin = distPackage({
+        outputDir: OUTPUT_DIR,
+        content: { peerDependencies: { react: '>=18' } },
+      });
+      mockFs.readJsonSync.mockReturnValue({
+        devDependencies: { react: '^18.0.0' },
+      });
+      callModuleParsed(plugin, ['react']);
+      await callGenerateBundle(plugin);
+
+      const result = getWrittenPackageJson();
+      expect(result).toMatchObject({ peerDependencies: { react: '>=18' } });
+      expect(result).not.toHaveProperty('dependencies');
+    });
   });
 
   // -------------------------
@@ -314,15 +397,17 @@ describe('distPackage', () => {
   describe('generateBundle - resolveWorkspaceDeps', () => {
     function makeWorkspacePlugin(
       specifier: string,
+      range?: '^' | '~',
     ): ReturnType<typeof distPackage> {
       const plugin = distPackage({
         outputDir: OUTPUT_DIR,
         resolveWorkspaceDeps: true,
         packagesDir: 'packages',
+        range,
       });
       mockFileTree(['packages/pkg-a/package.json']);
       mockFs.readJsonSync.mockImplementation((filePath) => {
-        if (filePath === path.join('packages', 'pkg-a', 'package.json')) {
+        if (filePath === path.resolve('packages', 'pkg-a', 'package.json')) {
           return { name: 'pkg-a', version: '1.2.3' };
         }
         return { dependencies: { 'pkg-a': specifier } };
@@ -331,8 +416,12 @@ describe('distPackage', () => {
       return plugin;
     }
 
-    async function resolveTest(specifier: string, expected: string) {
-      const plugin = makeWorkspacePlugin(specifier);
+    async function resolveTest(
+      specifier: string,
+      expected: string,
+      range?: '^' | '~',
+    ) {
+      const plugin = makeWorkspacePlugin(specifier, range);
       await callGenerateBundle(plugin);
       const deps = getWrittenPackageJson().dependencies as Record<
         string,
@@ -356,6 +445,84 @@ describe('distPackage', () => {
     it('link:./local → 実バージョン', () =>
       resolveTest('link:./local', '1.2.3'));
 
+    describe('range', () => {
+      it('* → rangeを付与', () => resolveTest('*', '^1.2.3', '^'));
+      it('workspace:* → rangeを付与', () =>
+        resolveTest('workspace:*', '^1.2.3', '^'));
+      it('workspace: → rangeを付与', () =>
+        resolveTest('workspace:', '~1.2.3', '~'));
+      it('link:./local → rangeを付与', () =>
+        resolveTest('link:./local', '^1.2.3', '^'));
+      it('portal:./local → rangeを付与', () =>
+        resolveTest('portal:./local', '^1.2.3', '^'));
+      it('workspace:~ → 明示されたレンジを優先', () =>
+        resolveTest('workspace:~', '~1.2.3', '^'));
+      it('workspace:^1.0.0 → 明示されたレンジを優先', () =>
+        resolveTest('workspace:^1.0.0', '^1.0.0', '~'));
+    });
+
+    it('通常のバージョン指定はそのまま', () => resolveTest('^1.0.0', '^1.0.0'));
+
+    it('ワークスペースに見つからない場合はそのまま出力し警告する', async () => {
+      const plugin = distPackage({
+        outputDir: OUTPUT_DIR,
+        resolveWorkspaceDeps: true,
+        packagesDir: 'packages',
+      });
+      mockFs.readJsonSync.mockReturnValue({
+        dependencies: { 'pkg-x': 'link:../pkg-x', 'pkg-y': '*' },
+      });
+      callModuleParsed(plugin, ['pkg-x', 'pkg-y']);
+      await callGenerateBundle(plugin);
+
+      expect(getWrittenPackageJson().dependencies).toEqual({
+        'pkg-x': 'link:../pkg-x',
+        'pkg-y': '*',
+      });
+      // '*' はワークスペース外のパッケージにも使われるため警告しない
+      expect(context.warn).toHaveBeenCalledTimes(1);
+      expect(context.warn.mock.calls[0]![0]).toContain('pkg-x');
+    });
+
+    it('packagesDirはinputDirを基準に解決される', async () => {
+      const plugin = distPackage({
+        outputDir: OUTPUT_DIR,
+        resolveWorkspaceDeps: true,
+        inputDir: '/ws/packages/main',
+      });
+      mockFileTree(['/ws/packages/pkg-a/package.json']);
+      mockFs.readJsonSync.mockImplementation((filePath) => {
+        if (filePath === path.resolve('/ws/packages/pkg-a/package.json')) {
+          return { name: 'pkg-a', version: '1.2.3' };
+        }
+        return { dependencies: { 'pkg-a': 'link:../pkg-a' } };
+      });
+      callModuleParsed(plugin, ['pkg-a']);
+      await callGenerateBundle(plugin);
+
+      expect(getWrittenPackageJson().dependencies).toEqual({
+        'pkg-a': '1.2.3',
+      });
+    });
+
+    it('ワークスペースの探索は1回のビルドで1回だけ行う', async () => {
+      const plugin = makeWorkspacePlugin('link:../pkg-a');
+      const orgImpl = mockFs.readJsonSync.getMockImplementation()!;
+      mockFs.readJsonSync.mockImplementation((filePath) =>
+        filePath === path.resolve('package.json')
+          ? {
+              dependencies: { 'pkg-a': 'link:../pkg-a' },
+              optionalDependencies: { 'pkg-b': 'link:../pkg-b' },
+              devDependencies: { 'pkg-c': 'link:../pkg-c' },
+            }
+          : orgImpl(filePath),
+      );
+      callModuleParsed(plugin, ['pkg-b', 'pkg-c']);
+      await callGenerateBundle(plugin);
+
+      expect(mockFs.readdirSync).toHaveBeenCalledTimes(1);
+    });
+
     describe('パッケージの探索', () => {
       async function resolveVersions(
         files: Record<string, { name: string; version: string }>,
@@ -369,13 +536,13 @@ describe('distPackage', () => {
         mockFileTree(Object.keys(files), symlinks);
         const packageJsons = new Map(
           Object.entries(files).map(([file, json]) => [
-            path.normalize(file),
+            path.resolve(file),
             json,
           ]),
         );
         mockFs.readJsonSync.mockImplementation(
           (filePath) =>
-            packageJsons.get(path.normalize(filePath as string)) ?? {
+            packageJsons.get(path.resolve(filePath as string)) ?? {
               dependencies: { 'pkg-a': '*', 'pkg-b': '*' },
             },
         );
@@ -446,37 +613,82 @@ describe('distPackage', () => {
   });
 
   // -------------------------
-  // generateBundle - outputDir解決
+  // generateBundle - 出力先
   // -------------------------
-  describe('generateBundle - outputDir解決', () => {
-    it('options.outputDirが指定された場合はそこに出力される', async () => {
+  describe('generateBundle - 出力先', () => {
+    it('outputDirが指定された場合はそこに出力される', async () => {
       const plugin = distPackage({ outputDir: '/custom/dist' });
       mockFs.readJsonSync.mockReturnValue({});
-      await callGenerateBundle(plugin, { dir: '/other' });
+      await callGenerateBundle(plugin);
 
-      expect(mockFs.writeJsonSync.mock.calls[0]![0]).toContain(
-        path.normalize('/custom/dist'),
+      expect(mockFs.outputFileSync.mock.calls[0]![0]).toBe(
+        path.join('/custom/dist', 'package.json'),
       );
+      expect(context.emitFile).not.toHaveBeenCalled();
     });
 
-    it('outputDirがない場合はoutputOptions.dirが使われる', async () => {
+    it('outputDirがない場合はアセットとして出力される', async () => {
       const plugin = distPackage();
-      mockFs.readJsonSync.mockReturnValue({});
-      await callGenerateBundle(plugin, { dir: '/from-rollup' });
+      mockFs.readJsonSync.mockReturnValue({ name: 'my-pkg' });
+      await callGenerateBundle(plugin);
 
-      expect(mockFs.writeJsonSync.mock.calls[0]![0]).toContain(
-        path.normalize('/from-rollup'),
-      );
+      expect(mockFs.outputFileSync).not.toHaveBeenCalled();
+      expect(context.emitFile).toHaveBeenCalledWith({
+        type: 'asset',
+        fileName: 'package.json',
+        source: `${JSON.stringify({ name: 'my-pkg' }, null, 2)}
+`,
+      });
+    });
+  });
+
+  // -------------------------
+  // watchモード
+  // -------------------------
+  describe('watchモード', () => {
+    it('再解析されたモジュールのimportは上書きされる', async () => {
+      const plugin = distPackage({ outputDir: OUTPUT_DIR });
+      mockFs.readJsonSync.mockReturnValue({
+        dependencies: { react: '^18.0.0', lodash: '^4.0.0' },
+      });
+      callModuleParsed(plugin, ['react', 'lodash'], [], '/project/src/a.ts');
+      callModuleParsed(plugin, ['react'], [], '/project/src/a.ts');
+      await callGenerateBundle(plugin);
+
+      expect(getWrittenPackageJson().dependencies).toEqual({
+        react: '^18.0.0',
+      });
     });
 
-    it('dirもない場合はoutputOptions.fileのdirnameが使われる', async () => {
-      const plugin = distPackage();
-      mockFs.readJsonSync.mockReturnValue({});
-      await callGenerateBundle(plugin, { file: '/build/bundle/index.js' });
+    it('削除されたモジュールのimportは除外される', async () => {
+      const plugin = distPackage({ outputDir: OUTPUT_DIR });
+      mockFs.readJsonSync.mockReturnValue({
+        dependencies: { react: '^18.0.0', lodash: '^4.0.0' },
+      });
+      callModuleParsed(plugin, ['react'], [], '/project/src/a.ts');
+      callModuleParsed(plugin, ['lodash'], [], '/project/src/b.ts');
+      callWatchChange(plugin, '/project/src/b.ts', 'delete');
+      await callGenerateBundle(plugin);
 
-      expect(mockFs.writeJsonSync.mock.calls[0]![0]).toContain(
-        path.normalize('/build/bundle'),
-      );
+      expect(getWrittenPackageJson().dependencies).toEqual({
+        react: '^18.0.0',
+      });
+    });
+
+    it('同じモジュールが複数のビルドで解析されても収集結果は変わらない', async () => {
+      const plugin = distPackage({ outputDir: OUTPUT_DIR });
+      mockFs.readJsonSync.mockReturnValue({
+        dependencies: { react: '^18.0.0', lodash: '^4.0.0' },
+      });
+      callModuleParsed(plugin, ['react'], [], '/project/src/a.ts');
+      callModuleParsed(plugin, ['lodash'], [], '/project/src/a.d.ts');
+      callModuleParsed(plugin, ['react'], [], '/project/src/a.ts');
+      await callGenerateBundle(plugin);
+
+      expect(getWrittenPackageJson().dependencies).toEqual({
+        react: '^18.0.0',
+        lodash: '^4.0.0',
+      });
     });
   });
 });

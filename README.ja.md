@@ -38,59 +38,54 @@ export default {
 };
 ```
 
-## オプション
+## API
 
-### `inheritProps`
+### `distPackage`
 
-- `string[]`
-- 元の `package.json` から継承するプロパティを指定します。
-- デフォルト: `['name', 'version', 'description', 'repository', 'bugs', 'homepage', 'author', 'contributors', 'license', 'type', 'engines', 'keywords', 'sideEffects', 'peerDependenciesMeta']`
+```ts
+distPackage(options?: DistPackageOptions): Plugin
+```
 
-### `content`
+`package.json` を編集し、ビルド結果のディレクトリに出力するプラグインを作成します。
 
-- `Partial<PackageJson>` または `(packageJson: PackageJson) => Partial<PackageJson>`
-- 生成する `package.json` の内容を指定できます。
+| 引数       | 型                   | 説明             |
+| ---------- | -------------------- | ---------------- |
+| `options?` | `DistPackageOptions` | 下記のオプション |
 
-### `inputDir`
+| オプション              | 型                                                                             | 説明                                                                                                                                                       |
+| ----------------------- | ------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `inheritProps?`         | `readonly string[]`                                                            | `content` で未設定の場合に元の `package.json` から引き継ぐプロパティ。`sideEffects: false` のような偽値も引き継ぐ。デフォルト: 下記                        |
+| `content?`              | `Partial<PackageJson> \| ((packageJson: PackageJson) => Partial<PackageJson>)` | 生成する `package.json` の内容。依存関係の項目に指定したパッケージは、元の `package.json` から収集した値より優先する                                       |
+| `inputDir?`             | `string`                                                                       | 元の `package.json` のあるディレクトリ。デフォルト: カレントディレクトリ                                                                                   |
+| `outputDir?`            | `string`                                                                       | `package.json` の出力先ディレクトリ。未指定の場合は Rollup の出力先にアセットとして出力する                                                                |
+| `resolveWorkspaceDeps?` | `boolean`                                                                      | `workspace:` / `portal:` / `link:` / `*` 形式のバージョン指定を、ワークスペース内のパッケージの実際のバージョンに置き換える。デフォルト: `false`           |
+| `range?`                | `VersionRange \| null`                                                         | `resolveWorkspaceDeps` で置き換える際、レンジが明示されていない指定に付与する記号                                                                          |
+| `packagesDir?`          | `string`                                                                       | ワークスペースのパッケージが格納されているディレクトリ（`inputDir` からの相対パス）。`resolveWorkspaceDeps` が `true` のときに参照する。デフォルト: `'..'` |
+| `processor?`            | `(packageJson: PackageJson) => PackageJson`                                    | 最終的に `package.json` を出力する前に行う加工処理                                                                                                         |
 
-- `string | undefined`
-- 元の `package.json` のあるディレクトリを指定します。
-- デフォルト: カレントディレクトリ
+`inheritProps` のデフォルトは `['name', 'version', 'description', 'repository', 'bugs', 'homepage', 'author', 'contributors', 'license', 'type', 'engines', 'keywords', 'sideEffects', 'peerDependenciesMeta']` です。
 
-### `outputDir`
+#### ワークスペースの依存関係の解決
 
-- `string | undefined`
-- `package.json` の出力先ディレクトリを指定します。
-- デフォルト: `rollup` の `output` 設定から取得
+`resolveWorkspaceDeps: true` のとき、バージョン指定は以下のように置き換えられます（例: パッケージのバージョンが `1.2.3` の場合）。\
+指定にレンジが明示されている場合は、`range` よりもそちらを優先します。
 
-### `resolveWorkspaceDeps`
+| 指定値                              | 置き換え後 | `range: '^'` の場合 |
+| ----------------------------------- | ---------- | ------------------- |
+| `workspace:*` / `workspace:` / `*`  | `1.2.3`    | `^1.2.3`            |
+| `portal:../path` / `link:../path`   | `1.2.3`    | `^1.2.3`            |
+| `workspace:^`                       | `^1.2.3`   | `^1.2.3`            |
+| `workspace:~`                       | `~1.2.3`   | `~1.2.3`            |
+| `workspace:^1.0.0` (明示バージョン) | `^1.0.0`   | `^1.0.0`            |
 
-- `boolean`
-- `true` にすると、各依存関係フィールド内の `workspace:` / `portal:` / `link:` 形式のバージョン指定を実際のバージョンに置き換えます。
-- pnpm ワークスペースを使用しない場合や、ビルド時にバージョンを確定させたい場合に使用します。
-- デフォルト: `false`
+`packagesDir` にパッケージが見つからない場合は、指定値をそのまま出力し警告を出します（ワークスペース外のパッケージにも使われる `*` は除く）。
 
-置き換えのルールは以下の通りです。
+### 型
 
-| 指定値                              | 置き換え後 (例: `1.2.3`) |
-| ----------------------------------- | ------------------------ |
-| `workspace:*` / `*`                 | `1.2.3`                  |
-| `workspace:^`                       | `^1.2.3`                 |
-| `workspace:~`                       | `~1.2.3`                 |
-| `workspace:^1.0.0` (明示バージョン) | `^1.0.0`                 |
-| `portal:../path` / `link:../path`   | `1.2.3`                  |
-
-### `packagesDir`
-
-- `string | undefined`
-- ワークスペースのパッケージが格納されているディレクトリのパスを指定します。
-- `resolveWorkspaceDeps` が `true` のときに参照されます。
-- デフォルト: `'..'`
-
-### `processor`
-
-- `(packageJson: PackageJson) => PackageJson`
-- 最終的に `package.json` を出力する前に加工処理を行います。
+| 型                   | 説明                                   |
+| -------------------- | -------------------------------------- |
+| `DistPackageOptions` | `distPackage` のオプション             |
+| `VersionRange`       | `range` に指定する記号（`'^' \| '~'`） |
 
 ## 依存関係の処理について
 
@@ -104,6 +99,8 @@ export default {
 | `devDependencies`      | `dependencies`         | 実際に import したパッケージのみ |
 
 `peerDependencies` だけフィルタなしで全エントリを保持する理由は、`import type` のような型専用 import や、プラグイン API 経由で受け取るだけで直接 import しないケース（例: rollup プラグインが `rollup` 自体を peer に持つ場合）があるためです。
+
+import の検出は、パッケージ名で指定されたモジュール（`react`、`lodash/merge` など）を対象にします。バンドルされたモジュールと外部モジュールを区別できないため、相対パス・絶対パスはパッケージとして扱いません。型定義を同時にビルドする場合（tsdown の `dts: true` など）は、型としてのみ import しているパッケージも含まれます。
 
 ## ライセンス
 
