@@ -1,6 +1,6 @@
 {
   "name": "@fringeworks/rollup-plugin-dist-package",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "description": "A plugin some will find handy, generating distribution-specific package.json files to maintain clean import paths.",
   "keywords": [
     "rollup",
@@ -39,27 +39,28 @@
   "scripts": {
     "build": "tsdown",
     "check": "tsc --noEmit",
+    "release": "pnpm build && npm publish",
     "test": "vitest"
   },
   "dependencies": {
     "fs-extra": "^11.3.4",
     "sort-package-json": "^3.6.1",
-    "type-fest": "^5.5.0"
+    "type-fest": "^5.6.0"
   },
   "devDependencies": {
-    "@fringeworks/dev": "^0.9.3",
+    "@fringeworks/dev": "^0.10.0",
     "@types/fs-extra": "^11.0.4",
     "@types/node": "^25.5.0",
-    "@vitest/coverage-v8": "^4.1.8",
+    "@vitest/coverage-v8": "^4.1.11",
     "prettier": "^3.8.3",
     "prettier-plugin-organize-imports": "^4.3.0",
     "prettier-plugin-packagejson": "^3.0.2",
     "rollup": "^4.40.1",
-    "tsdown": "^0.22.0",
-    "tsx": "^4.21.0",
-    "typescript": "^6.0.2",
+    "tsdown": "^0.23.1",
+    "tsx": "^4.22.3",
+    "typescript": "^6.0.3",
     "unrun": "^0.3.0",
-    "vitest": "^4.1.8"
+    "vitest": "^4.1.11"
   },
   "peerDependencies": {
     "rollup": "^4.0.0"
