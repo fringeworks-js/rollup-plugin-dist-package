@@ -10,7 +10,7 @@ if (fs.existsSync(CJS_PATH)) {
     if (item.endsWith('.js')) {
       const itemPath = path.join(CJS_PATH, item);
       // 内容の修正
-      let source = fs.readFileSync(itemPath, { encoding: 'utf8' });
+      const source = fs.readFileSync(itemPath, { encoding: 'utf8' });
       const match = REGEXP.exec(source);
       if (match) {
         fs.writeFileSync(

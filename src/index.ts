@@ -19,8 +19,7 @@ export type DistPackageOptions = {
    * 依存関係の項目に指定したパッケージは、元のpackage.jsonから収集した値より優先する
    */
   content?:
-    | Partial<PackageJson>
-    | ((packageJson: PackageJson) => Partial<PackageJson>);
+    Partial<PackageJson> | ((packageJson: PackageJson) => Partial<PackageJson>);
 
   /**
    * 入力元ディレクトリ
