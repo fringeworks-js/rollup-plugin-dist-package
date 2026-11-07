@@ -120,8 +120,8 @@ importers:
         version: 5.6.0
     devDependencies:
       '@fringeworks/dev':
-        specifier: ^0.13.1
-        version: 0.13.1(eslint@10.13.0(supports-color@7.2.0))(prettier@3.9.10)(rollup@4.60.2)(supports-color@7.2.0)(tsdown@0.23.1(tsx@4.23.15)(typescript@6.0.3)(unrun@0.3.0))(typescript@6.0.3)
+        specifier: ^0.13.3
+        version: 0.13.3(eslint@10.13.0(supports-color@7.2.0))(prettier@3.9.10)(rollup@4.60.2)(supports-color@7.2.0)(tsdown@0.23.1(tsx@4.23.15)(typescript@6.0.3)(unrun@0.3.0))(typescript@6.0.3)
       '@types/fs-extra':
         specifier: ^11.0.4
         version: 11.0.4
@@ -604,8 +604,8 @@ packages:
     resolution: {integrity: sha512-IkO+/KEUvwbVpiURZg+P7zF74z5Jxe0UgJxVni+RtoHQ6IZieXaO02kmadomap/q+l6bc/jdPGGqTjhuZnuz1Q==}
     engines: {node: ^20.19.0 || ^22.13.0 || >=24}
 
-  '@fringeworks/dev@0.13.1':
-    resolution: {integrity: sha512-DBofYsRxKLpNbhoTVhiyKgA68ZCHfLu5TqCbF2C+9EqU/amyAHTlJW0Md+d7sMc1SEh31vLqK2MmAMuyNdR2Fg==}
+  '@fringeworks/dev@0.13.3':
+    resolution: {integrity: sha512-NOHgvH5q5+FxGAiFwyd9W07LhYEHJEGztt+0a5RF0/1gmIslpNvSkp0wHezeGvqj1Q09qNmAZ5tdfB4D4Zf4Jg==}
     peerDependencies:
       eslint: ^10.0.0
       prettier: ^3.0.0
@@ -621,10 +621,16 @@ packages:
       typescript:
         optional: true
 
-  '@fringeworks/rollup-plugin-dist-package@0.9.1':
-    resolution: {integrity: sha512-KP1giyKf0jzF/imU6+Ij+ES3NKiemE2JHyIPUcTJ0XElPWWxoxZKmdE1Bnnk4giu9dH6YooaPb6JOJzWsjhHSA==}
+  '@fringeworks/rollup-plugin-dist-package@0.9.3':
+    resolution: {integrity: sha512-ciat4rQ++GrKFg7R0LtANytoWhgNnaeielKbB+8LpiI9RkVuG78tbHvql8WpuQC0H7o5bYf6yqAO0Qy0u5DUmg==}
     peerDependencies:
       rollup: ^4.0.0
+
+  '@fringeworks/types@1.1.1':
+    resolution: {integrity: sha512-pmwqKj9Wpj9PjH+owFd+ELgyLYqW3xuucl+K0dFORNovwissi19F6O2sBqhC8hXGPldPaO/HBd3A9k2vPLa9Nw==}
+
+  '@fringeworks/utils@2.2.0':
+    resolution: {integrity: sha512-vv0Dd/j2hu5khjzSBolYXfRcZ2oJPgrSGzE6GFu+laFogNQ+aDL0OxfFeYeru71fFXrHwrInahocTq49V/siTw==}
 
   '@humanfs/core@0.19.2':
     resolution: {integrity: sha512-UhXNm+CFMWcbChXywFwkmhqjs3PRCmcSa/hfBgLIb7oQ5HNb1wS0icWsGtSAUNgefHeI+eBrA8I1fxmbHsGdvA==}
@@ -1769,6 +1775,10 @@ packages:
   keyv@5.6.0:
     resolution: {integrity: sha512-CYDD3SOtsHtyXeEORYRx2qBtpDJFjRTGXUtmNEMGyzYOKj1TE3tycdlho7kA1Ufx9OYWZzg52QFBGALTirzDSw==}
 
+  klona@2.0.6:
+    resolution: {integrity: sha512-dhG34DXATL5hSxJbIexCft8FChFXtmskoZYnoPWjXQuebWYCNkVeV3KkGegCK9CP1oswI/vQibS2GY7Em/sJJA==}
+    engines: {node: '>= 8'}
+
   levn@0.4.1:
     resolution: {integrity: sha512-+bT2uH4E5LGE7h/n3evcS/sQlJXCpIp6ym8OWJ5eV6+67Dsql/LaaT7qJBAt2rzfoa/5QBGBhxDix1dMt2kQKQ==}
     engines: {node: '>= 0.8.0'}
@@ -2693,10 +2703,11 @@ snapshots:
       '@eslint/core': 1.2.1
       levn: 0.4.1
 
-  '@fringeworks/dev@0.13.1(eslint@10.13.0(supports-color@7.2.0))(prettier@3.9.10)(rollup@4.60.2)(supports-color@7.2.0)(tsdown@0.23.1(tsx@4.23.15)(typescript@6.0.3)(unrun@0.3.0))(typescript@6.0.3)':
+  '@fringeworks/dev@0.13.3(eslint@10.13.0(supports-color@7.2.0))(prettier@3.9.10)(rollup@4.60.2)(supports-color@7.2.0)(tsdown@0.23.1(tsx@4.23.15)(typescript@6.0.3)(unrun@0.3.0))(typescript@6.0.3)':
     dependencies:
       '@eslint/js': 10.0.1(eslint@10.13.0(supports-color@7.2.0))
-      '@fringeworks/rollup-plugin-dist-package': 0.9.1(rollup@4.60.2)
+      '@fringeworks/rollup-plugin-dist-package': 0.9.3(rollup@4.60.2)
+      '@fringeworks/utils': 2.2.0
       eslint-plugin-react-hooks: 7.1.1(eslint@10.13.0(supports-color@7.2.0))(supports-color@7.2.0)
       fast-glob: 3.3.3
       fs-extra: 11.3.4
@@ -2716,12 +2727,20 @@ snapshots:
       - supports-color
       - vue-tsc
 
-  '@fringeworks/rollup-plugin-dist-package@0.9.1(rollup@4.60.2)':
+  '@fringeworks/rollup-plugin-dist-package@0.9.3(rollup@4.60.2)':
     dependencies:
       fs-extra: 11.3.4
       rollup: 4.60.2
       sort-package-json: 3.6.1
       type-fest: 5.6.0
+
+  '@fringeworks/types@1.1.1': {}
+
+  '@fringeworks/utils@2.2.0':
+    dependencies:
+      '@fringeworks/types': 1.1.1
+      klona: 2.0.6
+      remeda: 2.51.0
 
   '@humanfs/core@0.19.2':
     dependencies:
@@ -3670,6 +3689,8 @@ snapshots:
   keyv@5.6.0:
     dependencies:
       '@keyv/serialize': 1.1.1
+
+  klona@2.0.6: {}
 
   levn@0.4.1:
     dependencies:
