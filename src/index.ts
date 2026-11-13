@@ -147,99 +147,163 @@ export default function distPackage(options: DistPackageOptions = {}): Plugin {
         importsByModule.delete(id);
       }
     },
-    generateBundle() {
-      const imports = new Set<string>();
-      for (const packageNames of importsByModule.values()) {
-        for (const packageName of packageNames) {
-          imports.add(packageName);
-        }
-      }
-
-      // 開発時用のpackage.jsonを取得
-      const orgPackageJson: PackageJson = fs.readJsonSync(
-        path.join(inputDirPath, 'package.json'),
-        {
-          encoding: 'utf8',
-        },
-      );
-      // ビルドされたパッケージ用のpackage.jsonのベースを取得
-      const packageJson =
-        typeof content === 'function'
-          ? content(orgPackageJson)
-          : { ...content };
-
-      // ワークスペース内のパッケージのバージョン(必要になった時点で1回だけ取得する)
-      let versions: Record<string, string> | undefined;
-      const getVersions = () =>
-        (versions ??= _getPackageVersions(packagesDirPath));
-
-      // dependencies関連の項目を処理
-      // contentで指定したパッケージは収集の対象外にする
-      const allDeps = new Set<string>();
-      for (const dist of DIST_DEPENDENCIES_PROP_NAMES) {
-        for (const pkg of Object.keys(packageJson[dist] ?? {})) {
-          allDeps.add(pkg);
-        }
-      }
-      for (const { dev, dist, filter } of DEPENDENCIES_PROP_NAMES) {
-        const dependencies = _createDependencies(
-          orgPackageJson[dev],
-          imports,
-          filter,
-        );
-        const pkgs: Record<string, string> = {};
-        for (const [pkg, specifier] of dependencies) {
-          if (allDeps.has(pkg)) {
-            continue;
+    // CSS のプラグイン(tsdown の @tsdown/css など)が generateBundle で CSS を出力した後に読むため、後ろで動かす
+    generateBundle: {
+      order: 'post',
+      handler(_outputOptions, bundle) {
+        // 出力する CSS の @import も、importしている外部パッケージとして数える
+        // (フォントなどのリソースを、利用者のバンドラーに解決させるために残した @import)
+        // 削除された CSS が残らないよう、前のビルドの CSS の分を消してから集め直す(同期的に行うので、並列のビルドと混ざらない)
+        for (const key of importsByModule.keys()) {
+          if (key.startsWith(CSS_ASSET_KEY_PREFIX)) {
+            importsByModule.delete(key);
           }
-          allDeps.add(pkg);
-          pkgs[pkg] = resolveWorkspaceDeps
-            ? _resolveWorkspaceDependency(
-                pkg,
-                specifier,
-                getVersions,
-                range,
-                (message) => this.warn(message),
-              )
-            : specifier;
         }
-        if (Object.keys(pkgs).length) {
-          packageJson[dist] = {
-            ...packageJson[dist],
-            ...pkgs,
-          };
+        for (const output of Object.values(bundle)) {
+          if (output.type === 'asset' && output.fileName.endsWith('.css')) {
+            importsByModule.set(
+              `${CSS_ASSET_KEY_PREFIX}${output.fileName}`,
+              _getCssImportPackageNames(output.source),
+            );
+          }
         }
-      }
 
-      // 指定のプロパティが未設定で、開発時用のpackage.jsonにあれば設定
-      // sideEffects: false などの偽値も引き継ぐため、undefinedかどうかで判定する
-      for (const prop of inheritProps) {
-        if (
-          packageJson[prop] === undefined &&
-          orgPackageJson[prop] !== undefined
-        ) {
-          packageJson[prop] = orgPackageJson[prop];
+        const imports = new Set<string>();
+        for (const packageNames of importsByModule.values()) {
+          for (const packageName of packageNames) {
+            imports.add(packageName);
+          }
         }
-      }
 
-      const source = `${JSON.stringify(
-        sortPackageJson(processor(packageJson as PackageJson)),
-        null,
-        2,
-      )}\n`;
+        // 開発時用のpackage.jsonを取得
+        const orgPackageJson: PackageJson = fs.readJsonSync(
+          path.join(inputDirPath, 'package.json'),
+          {
+            encoding: 'utf8',
+          },
+        );
+        // ビルドされたパッケージ用のpackage.jsonのベースを取得
+        const packageJson =
+          typeof content === 'function'
+            ? content(orgPackageJson)
+            : { ...content };
 
-      if (outputDir) {
-        // 指定されたディレクトリに出力
-        fs.outputFileSync(path.join(outputDir, 'package.json'), source, {
-          encoding: 'utf8',
-        });
-      } else {
-        // rollupの出力先にアセットとして出力
-        // output.fileの場合もそのディレクトリに出力される
-        this.emitFile({ type: 'asset', fileName: 'package.json', source });
-      }
+        // ワークスペース内のパッケージのバージョン(必要になった時点で1回だけ取得する)
+        let versions: Record<string, string> | undefined;
+        const getVersions = () =>
+          (versions ??= _getPackageVersions(packagesDirPath));
+
+        // dependencies関連の項目を処理
+        // contentで指定したパッケージは収集の対象外にする
+        const allDeps = new Set<string>();
+        for (const dist of DIST_DEPENDENCIES_PROP_NAMES) {
+          for (const pkg of Object.keys(packageJson[dist] ?? {})) {
+            allDeps.add(pkg);
+          }
+        }
+        for (const { dev, dist, filter } of DEPENDENCIES_PROP_NAMES) {
+          const dependencies = _createDependencies(
+            orgPackageJson[dev],
+            imports,
+            filter,
+          );
+          const pkgs: Record<string, string> = {};
+          for (const [pkg, specifier] of dependencies) {
+            if (allDeps.has(pkg)) {
+              continue;
+            }
+            allDeps.add(pkg);
+            pkgs[pkg] = resolveWorkspaceDeps
+              ? _resolveWorkspaceDependency(
+                  pkg,
+                  specifier,
+                  getVersions,
+                  range,
+                  (message) => this.warn(message),
+                )
+              : specifier;
+          }
+          if (Object.keys(pkgs).length) {
+            packageJson[dist] = {
+              ...packageJson[dist],
+              ...pkgs,
+            };
+          }
+        }
+
+        // 指定のプロパティが未設定で、開発時用のpackage.jsonにあれば設定
+        // sideEffects: false などの偽値も引き継ぐため、undefinedかどうかで判定する
+        for (const prop of inheritProps) {
+          if (
+            packageJson[prop] === undefined &&
+            orgPackageJson[prop] !== undefined
+          ) {
+            packageJson[prop] = orgPackageJson[prop];
+          }
+        }
+
+        const source = `${JSON.stringify(
+          sortPackageJson(processor(packageJson as PackageJson)),
+          null,
+          2,
+        )}\n`;
+
+        if (outputDir) {
+          // 指定されたディレクトリに出力
+          fs.outputFileSync(path.join(outputDir, 'package.json'), source, {
+            encoding: 'utf8',
+          });
+        } else {
+          // rollupの出力先にアセットとして出力
+          // output.fileの場合もそのディレクトリに出力される
+          this.emitFile({ type: 'asset', fileName: 'package.json', source });
+        }
+      },
     },
   };
+}
+
+/**
+ * 出力する CSS のimportを、モジュールのimportと同じ表に入れるときのキーの接頭辞
+ * (モジュールのIDとぶつからないよう、\0 で始める)
+ */
+const CSS_ASSET_KEY_PREFIX = '\0css-asset:';
+
+/**
+ * URL(スキームで始まるもの・プロトコル相対のもの)
+ * Windows のドライブ文字(`C:`)は path.isAbsolute で先に除くので、スキームとして扱ってよい
+ */
+const URL_LIKE = /^(?:[a-z][a-z0-9+.-]*:|\/\/)/i;
+
+/**
+ * CSS の @import の参照先(`@import 'x';`・`@import "x";`・`@import url(x);`・`@import url("x");`)
+ */
+const CSS_IMPORT = /@import\s+(?:url\(\s*)?(['"]?)([^'"()\s;]+)\1/g;
+
+/**
+ * CSS のコメント
+ */
+const CSS_COMMENT = /\/\*[\s\S]*?\*\//g;
+
+/**
+ * CSS の @import から、参照しているパッケージ名を取得する
+ * パッケージ名で指定されたものだけを対象とする(相対パス・絶対パス・URL は対象外)
+ * @param source CSS のソース
+ * @returns パッケージ名のリスト
+ */
+function _getCssImportPackageNames(source: string | Uint8Array): string[] {
+  const css = (
+    typeof source === 'string' ? source : new TextDecoder().decode(source)
+  ).replace(CSS_COMMENT, '');
+  const packageNames: string[] = [];
+  for (const match of css.matchAll(CSS_IMPORT)) {
+    // マッチしたときは必ずグループがある
+    const packageName = _getPackageName(match[2]!);
+    if (packageName) {
+      packageNames.push(packageName);
+    }
+  }
+  return packageNames;
 }
 
 /**
@@ -251,7 +315,13 @@ export default function distPackage(options: DistPackageOptions = {}): Plugin {
  * @returns パッケージ名
  */
 function _getPackageName(id: string): string | undefined {
-  if (id.startsWith('\0') || id.startsWith('.') || path.isAbsolute(id)) {
+  if (
+    id.startsWith('\0') ||
+    id.startsWith('.') ||
+    path.isAbsolute(id) ||
+    // URL(https:・data: など)・プロトコル相対のURL
+    URL_LIKE.test(id)
+  ) {
     return undefined;
   }
   const tokens = id.split('/');

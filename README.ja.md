@@ -102,6 +102,8 @@ distPackage(options?: DistPackageOptions): Plugin
 
 import の検出は、パッケージ名で指定されたモジュール（`react`、`lodash/merge` など）を対象にします。バンドルされたモジュールと外部モジュールを区別できないため、相対パス・絶対パスはパッケージとして扱いません。型定義を同時にビルドする場合（tsdown の `dts: true` など）は、型としてのみ import しているパッケージも含まれます。
 
+出力する CSS ファイルの `@import`（`@import 'material-symbols/outlined.css';`・`@import url("pkg/x.css");` など）も、import として数えます。アダプターが読み込むフォントのように、利用者のバンドラーに解決させるために CSS に残したパッケージが、`dependencies` に残るようにするためです。JavaScript と同じくパッケージ名で指定されたものだけを対象にし、相対パス・絶対パス・URL（`https:`・`//` など）は数えません。ほかのプラグイン（`@tsdown/css` など）が出力した CSS を読むため、`generateBundle` は `order: 'post'` で動きます。
+
 ## ライセンス
 
 MIT License

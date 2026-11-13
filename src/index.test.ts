@@ -84,8 +84,18 @@ function callWatchChange(
   (plugin.watchChange as any).call(context, id, { event });
 }
 
-async function callGenerateBundle(plugin: ReturnType<typeof distPackage>) {
-  await (plugin.generateBundle as any).call(context, {}, {});
+async function callGenerateBundle(
+  plugin: ReturnType<typeof distPackage>,
+  bundle: Record<string, unknown> = {},
+) {
+  await (plugin.generateBundle as any).handler.call(context, {}, bundle);
+}
+
+/**
+ * 出力の CSS のアセットを作る
+ */
+function cssAsset(fileName: string, source: string | Uint8Array) {
+  return { [fileName]: { type: 'asset', fileName, source } };
 }
 
 describe('distPackage', () => {
@@ -151,6 +161,99 @@ describe('distPackage', () => {
       expect(getWrittenPackageJson()).toMatchObject({
         dependencies: { lodash: '^4.0.0' },
       });
+    });
+  });
+
+  // -------------------------
+  // generateBundle - CSS の @import
+  // -------------------------
+  describe('generateBundle - CSS の @import', () => {
+    it('出力する CSS の @import で参照したパッケージを、importしたものとして数える', async () => {
+      const plugin = distPackage({ outputDir: OUTPUT_DIR });
+      mockFs.readJsonSync.mockReturnValue({
+        dependencies: {
+          'material-symbols': '^0.49.0',
+          '@scope/font': '^1.0.0',
+          'not-imported': '^1.0.0',
+        },
+      });
+      await callGenerateBundle(plugin, {
+        ...cssAsset('font.css', "@import 'material-symbols/outlined.css';"),
+        ...cssAsset('scoped.css', '@import "@scope/font/index.css";'),
+      });
+
+      const result = getWrittenPackageJson();
+      expect(result).toMatchObject({
+        dependencies: {
+          'material-symbols': '^0.49.0',
+          '@scope/font': '^1.0.0',
+        },
+      });
+      expect(result.dependencies).not.toHaveProperty('not-imported');
+    });
+
+    it('url() の形と、バイト列のソースも読む', async () => {
+      const plugin = distPackage({ outputDir: OUTPUT_DIR });
+      mockFs.readJsonSync.mockReturnValue({
+        dependencies: { a: '^1.0.0', b: '^1.0.0' },
+      });
+      await callGenerateBundle(plugin, {
+        ...cssAsset('a.css', '@import url("a/a.css") screen;'),
+        ...cssAsset('b.css', new TextEncoder().encode('@import url(b/b.css);')),
+      });
+
+      expect(getWrittenPackageJson()).toMatchObject({
+        dependencies: { a: '^1.0.0', b: '^1.0.0' },
+      });
+    });
+
+    it('相対パス・絶対パス・URL・コメントの中の @import は数えない', async () => {
+      const plugin = distPackage({ outputDir: OUTPUT_DIR });
+      mockFs.readJsonSync.mockReturnValue({
+        dependencies: { https: '^1.0.0', commented: '^1.0.0' },
+      });
+      await callGenerateBundle(
+        plugin,
+        cssAsset(
+          'styles.css',
+          [
+            "@import './local.css';",
+            "@import '/root.css';",
+            "@import 'https://fonts.googleapis.com/css2?family=x';",
+            "@import '//cdn.example.com/x.css';",
+            "/* @import 'commented/x.css'; */",
+          ].join('\n'),
+        ),
+      );
+
+      expect(getWrittenPackageJson()).not.toHaveProperty('dependencies');
+    });
+
+    it('CSS 以外のアセットは読まない', async () => {
+      const plugin = distPackage({ outputDir: OUTPUT_DIR });
+      mockFs.readJsonSync.mockReturnValue({
+        dependencies: { a: '^1.0.0' },
+      });
+      await callGenerateBundle(plugin, {
+        'notes.txt': {
+          type: 'asset',
+          fileName: 'notes.txt',
+          source: "@import 'a/a.css';",
+        },
+      });
+
+      expect(getWrittenPackageJson()).not.toHaveProperty('dependencies');
+    });
+
+    it('前のビルドの CSS の分は、次のビルドに残らない', async () => {
+      const plugin = distPackage({ outputDir: OUTPUT_DIR });
+      mockFs.readJsonSync.mockReturnValue({
+        dependencies: { a: '^1.0.0' },
+      });
+      await callGenerateBundle(plugin, cssAsset('a.css', "@import 'a/a.css';"));
+      await callGenerateBundle(plugin);
+
+      expect(getWrittenPackageJson()).not.toHaveProperty('dependencies');
     });
   });
 

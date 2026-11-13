@@ -101,6 +101,8 @@ Each dependency field is written to dist/package.json according to the following
 
 Imports are detected from module specifiers written as package names (e.g. `react`, `lodash/merge`). Relative and absolute paths are not treated as packages, because bundled modules cannot be distinguished from external ones. When type declarations are built together (e.g. `dts: true` in tsdown), packages imported only as types are also included.
 
+`@import` rules in the output CSS files are also counted as imports (`@import 'material-symbols/outlined.css';`, `@import url("pkg/x.css");`, and so on). This keeps a package that the CSS leaves for the user's bundler to resolve, such as the fonts an adapter loads, in `dependencies`. As with JavaScript, only package names are counted; relative paths, absolute paths, and URLs (`https:`, `//`, and so on) are not. To read the CSS that other plugins emit (such as `@tsdown/css`), `generateBundle` runs with `order: 'post'`.
+
 ## License
 
 MIT License
